@@ -1,6 +1,6 @@
 import healpy
 import numpy as np
-from polyopticx.tools import cached_download, get_cache_dir
+from tools import cached_download, get_cache_dir
 import tqdm
 import gzip
 import os
