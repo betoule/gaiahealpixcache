@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from gaiahealpixcache.celestial import center_at_date, gaia_to_topocentric
+from gaiahealpixcache.celestial import (
+    center_at_date,
+    conform_coordinates,
+    gaia_to_topocentric,
+)
 
 
 def _make_catalog(n=3):
@@ -68,3 +72,35 @@ def test_center_at_date_different_epoch():
     ra_app, dec_app = center_at_date(76.377, 52.831, 60000.0, refepoch=2000.0)
     assert isinstance(ra_app, float)
     assert isinstance(dec_app, float)
+
+
+def test_conform_coordinates_normal():
+    ra, dec = conform_coordinates(100.0, 45.0)
+    assert ra == pytest.approx(100.0)
+    assert dec == pytest.approx(45.0)
+
+
+def test_conform_coordinates_negative_ra():
+    ra, dec = conform_coordinates(-10.0, 45.0)
+    assert ra == pytest.approx(350.0)
+    assert dec == pytest.approx(45.0)
+
+
+def test_conform_coordinates_dec_over_90():
+    ra, dec = conform_coordinates(100.0, 95.0)
+    assert ra == pytest.approx(280.0)
+    assert dec == pytest.approx(85.0)
+
+
+def test_conform_coordinates_dec_under_minus90():
+    ra, dec = conform_coordinates(100.0, -95.0)
+    assert ra == pytest.approx(280.0)
+    assert dec == pytest.approx(-85.0)
+
+
+def test_conform_coordinates_array():
+    ras = np.array([-10.0, 100.0])
+    decs = np.array([45.0, 95.0])
+    ra, dec = conform_coordinates(ras, decs)
+    assert ra[0] == pytest.approx(350.0)
+    # Array path doesn't apply the scalar >90/<-90 correction

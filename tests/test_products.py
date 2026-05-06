@@ -6,8 +6,10 @@ import pytest
 from gaiahealpixcache.products import (
     DEFAULT_PRODUCTS,
     GaiaProduct,
+    _cleanup_cache,
     _get_config_dir,
     _init_registry,
+    _load_user_products,
     get_product,
     list_products,
     register_product,
@@ -311,3 +313,104 @@ def test_get_config_dir_posix(tmp_path):
             os.environ["XDG_CONFIG_HOME"] = orig
         elif "XDG_CONFIG_HOME" in os.environ:
             del os.environ["XDG_CONFIG_HOME"]
+
+
+# ---------------------------------------------------------------------------
+# Load user products
+# ---------------------------------------------------------------------------
+
+
+def test_load_user_products_valid(tmp_path):
+    products_dir = tmp_path / "gaiahealpixcache" / "products"
+    products_dir.mkdir(parents=True)
+    prod = GaiaProduct(
+        name="test_load",
+        url="http://example.com/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="Test_",
+        file_ext=".csv.gz",
+        columns=["ra", "dec"],
+    )
+    with open(products_dir / "test_load.json", "w") as f:
+        json.dump(prod.to_dict(), f)
+
+    orig = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    try:
+        result = _load_user_products()
+        assert "test_load" in result
+        assert result["test_load"].columns == ["ra", "dec"]
+    finally:
+        if orig is not None:
+            os.environ["XDG_CONFIG_HOME"] = orig
+        elif "XDG_CONFIG_HOME" in os.environ:
+            del os.environ["XDG_CONFIG_HOME"]
+
+
+def test_load_user_products_invalid_json(tmp_path, capsys):
+    products_dir = tmp_path / "gaiahealpixcache" / "products"
+    products_dir.mkdir(parents=True)
+    with open(products_dir / "bad.json", "w") as f:
+        f.write("not valid json{{{")
+
+    orig = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    try:
+        result = _load_user_products()
+        assert "bad" not in result
+        captured = capsys.readouterr()
+        assert "Warning:" in captured.out
+    finally:
+        if orig is not None:
+            os.environ["XDG_CONFIG_HOME"] = orig
+        elif "XDG_CONFIG_HOME" in os.environ:
+            del os.environ["XDG_CONFIG_HOME"]
+
+
+def test_load_user_products_missing_key(tmp_path, capsys):
+    products_dir = tmp_path / "gaiahealpixcache" / "products"
+    products_dir.mkdir(parents=True)
+    with open(products_dir / "incomplete.json", "w") as f:
+        json.dump({"name": "incomplete"}, f)
+
+    orig = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    try:
+        with pytest.raises(TypeError):
+            _load_user_products()
+    finally:
+        if orig is not None:
+            os.environ["XDG_CONFIG_HOME"] = orig
+        elif "XDG_CONFIG_HOME" in os.environ:
+            del os.environ["XDG_CONFIG_HOME"]
+
+
+# ---------------------------------------------------------------------------
+# Unregister non-existent product
+# ---------------------------------------------------------------------------
+
+
+def test_unregister_nonexistent():
+    with pytest.raises(KeyError, match="not found"):
+        unregister_product("does_not_exist_at_all")
+
+
+# ---------------------------------------------------------------------------
+# Cleanup cache early return
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_cache_no_dir(monkeypatch):
+    def mock_get_cache_dir():
+        return None
+
+    monkeypatch.setattr("gaiahealpixcache.cache.get_cache_dir", mock_get_cache_dir)
+    prod = GaiaProduct(
+        name="orphan",
+        url="http://example.com/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="Test_",
+        file_ext=".csv.gz",
+        columns=["ra"],
+    )
+    _cleanup_cache(prod)

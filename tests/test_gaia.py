@@ -97,12 +97,14 @@ def test_parse_md5sum_custom_prefix():
 def test_read_gaia():
     from gaiahealpixcache.products import COLUMNS_OF_INTEREST
 
+    comment = b"# %ECSV 1.0\n"
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
     data_values = b",".join(b"1.0" for _ in COLUMNS_OF_INTEREST) + b"\n"
     null_values = b",".join(b"null" for _ in COLUMNS_OF_INTEREST) + b"\n"
     data_lines = [data_values, null_values]
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
         gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(comment)
         gz.write(header)
         for line in data_lines:
             gz.write(line)
