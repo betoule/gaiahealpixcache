@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaiahealpixcache"
+version = "0.1.0"
+description = "Download and cache a lightweight version of the Gaia catalog for offline work"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Gaia Healpix Cache Contributors" }
+]
+keywords = ["gaia", "astronomy", "healpix", "catalog", "cache"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy>=1.26",
+    "astropy>=6.0",
+    "healpy",
+    "requests",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[project.urls]
+Homepage = "https://github.com/gaiahealpixcache/gaiahealpixcache"
+Repository = "https://github.com/gaiahealpixcache/gaiahealpixcache"
+Issues = "https://github.com/gaiahealpixcache/gaiahealpixcache/issues"
