@@ -65,7 +65,10 @@ def cached_download(url):
 
     with open(cache_path, "wb") as file:
         from tqdm import tqdm
-        with tqdm(total=total, unit="B", unit_scale=True, desc=os.path.basename(url)) as pbar:
+
+        with tqdm(
+            total=total, unit="B", unit_scale=True, desc=os.path.basename(url)
+        ) as pbar:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
                 pbar.update(len(chunk))
@@ -108,5 +111,5 @@ def join(*args, **keys):
     """
     return np.rec.fromarrays(
         [nt[k] for nt in args for k in nt.dtype.names] + [keys[k] for k in keys],
-        names=[k for nt in args for k in nt.dtype.names] + [k for k in keys]
+        names=[k for nt in args for k in nt.dtype.names] + list(keys),
     )

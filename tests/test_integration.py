@@ -41,6 +41,7 @@ def test_gaia_to_topocentric():
 @pytest.mark.slow
 def test_center_at_date():
     from astropy.time import Time
+
     mjd = Time.now().mjd
     ra_app, dec_app = gaiahealpixcache.center_at_date(76.377, 52.831, mjd)
     assert isinstance(ra_app, float)

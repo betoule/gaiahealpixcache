@@ -11,8 +11,9 @@ from gaiahealpixcache.gaia import (
     get_pix_range,
     haversine,
     parse_md5sum,
-    read_gaia,
     query,
+    read_gaia,
+    retrieve_gaia_data,
 )
 
 
@@ -76,6 +77,7 @@ def test_parse_md5sum():
 
 def test_read_gaia():
     from gaiahealpixcache.gaia import COLUMNS_OF_INTEREST
+
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
     data_values = b",".join(b"1.0" for _ in COLUMNS_OF_INTEREST) + b"\n"
     null_values = b",".join(b"null" for _ in COLUMNS_OF_INTEREST) + b"\n"
@@ -103,3 +105,78 @@ def test_columns_of_interest():
     assert "ra" in COLUMNS_OF_INTEREST
     assert "dec" in COLUMNS_OF_INTEREST
     assert len(COLUMNS_OF_INTEREST) == 19
+
+
+def test_get_pix_range():
+    ranges = get_pix_range([76.377, 76.5], [52.831, 52.9])
+    assert isinstance(ranges, list)
+    assert len(ranges) >= 1
+
+
+def test_haversine_negative_coords():
+    dist = haversine(-180.0, -90.0, 180.0, 90.0)
+    assert dist == pytest.approx(180.0, abs=1e-10)
+
+
+def test_haversine_small_distance():
+    dist = haversine(0.0, 0.0, 0.01, 0.01)
+    assert 0 < dist < 1
+
+
+def test_get_pixlist_level():
+    ras = [0.0]
+    decs = [0.0]
+    pixlist_l8 = get_pixlist(ras, decs, level=8)
+    pixlist_l9 = get_pixlist(ras, decs, level=9)
+    assert len(pixlist_l9) >= len(pixlist_l8)
+
+
+def test_query(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.377, 76.5]), np.array([52.831, 53.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query(76.377, 52.831, radius_arcmin=30)
+    assert len(result) >= 0
+    mock_retrieve.assert_called()
+
+
+def test_retrieve_gaia_data_cached(mocker):
+    mock_np_load = mocker.patch(
+        "numpy.load",
+        return_value=np.rec.fromarrays(
+            [np.array([1.0, 2.0])],
+            names=["source_id"],
+        ),
+    )
+    mocker.patch("os.path.exists", return_value=True)
+    result = retrieve_gaia_data("0-63")
+    mock_np_load.assert_called_once()
+    assert len(result) == 2
+
+
+def test_retrieve_gaia_data_download(mocker):
+    mock_cached = mocker.patch(
+        "gaiahealpixcache.gaia.cached_download",
+        return_value="/tmp/test.csv.gz",
+    )
+    mock_read = mocker.patch(
+        "gaiahealpixcache.gaia.read_gaia",
+        return_value=np.rec.fromarrays(
+            [np.array([1.0])],
+            names=["source_id"],
+        ),
+    )
+    mock_save = mocker.patch("numpy.save")
+    mock_remove = mocker.patch("os.remove")
+    mock_exists = mocker.patch("os.path.exists", return_value=False)
+
+    result = retrieve_gaia_data("0-63")
+    mock_cached.assert_called_once()
+    mock_read.assert_called_once()
+    mock_save.assert_called_once()
+    mock_remove.assert_called_once()
+    assert len(result) == 1

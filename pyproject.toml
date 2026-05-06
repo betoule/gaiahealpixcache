@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dependencies = [
@@ -38,12 +39,42 @@ dependencies = [
 test = [
     "pytest",
     "pytest-mock",
+    "pytest-cov",
+]
+dev = [
+    "black",
+    "pylint",
+    "pre-commit",
 ]
 
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+addopts = "--cov=gaiahealpixcache --cov-fail-under=90 -m 'not slow'"
+
+[tool.black]
+line-length = 88
+target-version = ["py311", "py312", "py313"]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "C0103",  # conventional name violations (allows hPa, etc.)
+    "C0415",  # import outside toplevel (lazy imports are intentional)
+    "C0206",  # consider iterating with .items() (dict comprehension pattern)
+    "W0603",  # global statement (used for lazy module-level caching)
+    "W1514",  # unspecified encoding (binary mode, not needed)
+    "R0913",  # too many arguments
+    "R0917",  # too many positional arguments
+    "R0914",  # too many local variables
+    "E1101",  # no-member (astropy units are dynamic)
+]
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "n", "ra", "dec", "x", "y", "z", "fn", "fid"]
 
 [project.urls]
 Homepage = "https://github.com/gaiahealpixcache/gaiahealpixcache"

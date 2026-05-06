@@ -1,6 +1,5 @@
 import gzip
 import os
-from pathlib import Path
 
 import healpy
 import numpy as np
@@ -58,7 +57,7 @@ def parse_md5sum(fn):
     ranges : list[str]
         Pixel range strings used in filenames.
     """
-    with open(fn) as fid:
+    with open(fn, encoding="utf-8") as fid:
         lines = fid.readlines()
     ranges = [
         l.split("GaiaSource_")[-1].split(".csv.gz")[0]
@@ -229,8 +228,9 @@ def query(ra_deg, dec_deg, radius_arcmin=30):
         Structured array of Gaia sources within the search radius.
     """
     rad = radius_arcmin / 60
+    cdec = np.cos(np.radians(dec_deg))
     dra, ddec = np.meshgrid(
-        np.linspace(ra_deg - rad, ra_deg + rad, 5),
+        np.linspace(ra_deg - rad / cdec, ra_deg + rad / cdec, 5),
         np.linspace(dec_deg - rad, dec_deg + rad, 5),
     )
 

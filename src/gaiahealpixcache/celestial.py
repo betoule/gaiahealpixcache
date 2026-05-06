@@ -51,6 +51,7 @@ def gaia_to_topocentric(
         Original columns plus: alt_deg, az_deg, zenith_distance_deg,
         hour_angle_deg, airmass, ra_apparent_deg, dec_apparent_deg.
     """
+
     def fill(x):
         return np.nan_to_num(x)
 

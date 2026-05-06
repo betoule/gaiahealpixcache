@@ -13,6 +13,7 @@ uv pip install gaiahealpixcache
 Or from source:
 
 ```bash
+git clone https://github.com/betoule/gaiahealpixcache.git
 uv venv
 source .venv/bin/activate
 uv pip install -e .

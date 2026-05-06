@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--config=pyproject.toml]
+
+  - repo: https://github.com/pycqa/pylint
+    rev: v3.3.3
+    hooks:
+      - id: pylint
+        args: [--rcfile=pyproject.toml]
+        additional_dependencies:
+          - numpy
+          - astropy
+          - healpy
+          - requests
+          - tqdm
