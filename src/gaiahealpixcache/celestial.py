@@ -12,6 +12,34 @@ from astropy.time import Time
 from .cache import join
 
 
+def conform_coordinates(ra, dec):
+    """Transform celestial coordinates to the normal convention (0<ra<360, -90<dec<90)
+
+    Parameters
+    ----------
+    ra: float
+        right ascension in degrees
+    dec: float
+        declination in degrees
+
+    Returns
+    -------
+        Original coordinates following the standard convention
+    """
+    ra = ra % 360
+    dec = (dec + 180) % 360 - 180
+    if np.isscalar(ra):
+        if dec > 90:
+            ra -= 180
+            dec = 180 - dec
+        elif dec < -90:
+            ra -= 180
+            dec = -180 - dec
+    # dec = (dec + 180) % 360 - 180
+    ra = ra % 360
+    return ra, dec
+
+
 def gaia_to_topocentric(
     catalog,
     mjd=None,
