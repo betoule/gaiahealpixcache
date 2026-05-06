@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 import hashlib
 import shutil
@@ -36,6 +37,10 @@ def get_cache_dir(path=False):
 def cached_download(url):
     """Download a file from the web with caching.
 
+    Downloads to a temporary file first, then atomically moves to the
+    final cache path. This prevents corrupted partial files from being
+    cached when a download fails.
+
     Parameters
     ----------
     url : str
@@ -63,15 +68,25 @@ def cached_download(url):
 
     total = int(response.headers.get("content-length", 0))
 
-    with open(cache_path, "wb") as file:
-        from tqdm import tqdm
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=cache_dir, prefix=f".{filename}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "wb") as file:
+            from tqdm import tqdm
 
-        with tqdm(
-            total=total, unit="B", unit_scale=True, desc=os.path.basename(url)
-        ) as pbar:
-            for chunk in response.iter_content(chunk_size=8192):
-                file.write(chunk)
-                pbar.update(len(chunk))
+            with tqdm(
+                total=total, unit="B", unit_scale=True, desc=os.path.basename(url)
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)
+                    pbar.update(len(chunk))
+
+        os.replace(tmp_path, cache_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
     return cache_path
 

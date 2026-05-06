@@ -52,6 +52,41 @@ def test_cached_download_new(mocker):
         assert f.read() == b"test data"
 
 
+def test_cached_download_cleanup_on_failure(mocker):
+    mock_get = mocker.patch("requests.get")
+    mock_response = mocker.MagicMock()
+    mock_response.headers = {"content-length": "200"}
+    mock_response.iter_content.side_effect = OSError("network interrupted")
+    mock_response.raise_for_status = mocker.MagicMock()
+    mock_get.return_value = mock_response
+
+    url = "https://example.com/failfile.txt"
+    cache_dir = get_cache_dir()
+    with pytest.raises(OSError):
+        cached_download(url)
+
+    tmp_files = [f for f in os.listdir(cache_dir) if f.endswith(".tmp")]
+    assert len(tmp_files) == 0, "Temp file not cleaned up after failed download"
+
+
+def test_cached_download_atomic_rename(mocker):
+    mock_get = mocker.patch("requests.get")
+    mock_response = mocker.MagicMock()
+    mock_response.headers = {"content-length": "50"}
+    mock_response.iter_content.return_value = [b"atomic test data"]
+    mock_response.raise_for_status = mocker.MagicMock()
+    mock_get.return_value = mock_response
+
+    url = "https://example.com/atomicfile.txt"
+    path = cached_download(url)
+
+    with open(path, "rb") as f:
+        assert f.read() == b"atomic test data"
+
+    tmp_files = [f for f in os.listdir(get_cache_dir()) if f.endswith(".tmp")]
+    assert len(tmp_files) == 0
+
+
 def test_clear_cache(mocker):
     cache_dir = get_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
