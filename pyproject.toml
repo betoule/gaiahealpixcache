@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gaiahealpixcache"
-version = "0.1.0"
+version = "0.2.0"
 description = "Download and cache a lightweight version of the Gaia catalog for offline work"
 readme = "README.md"
 license = {text = "MIT"}
@@ -71,6 +71,7 @@ disable = [
     "R0917",  # too many positional arguments
     "R0914",  # too many local variables
     "E1101",  # no-member (astropy units are dynamic)
+    "W0123",  # eval-used (safe eval with restricted namespace for where filter)
 ]
 
 [tool.pylint.basic]

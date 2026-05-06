@@ -7,45 +7,119 @@ This tool follows the official HEALPix level 8 partitioning of the Gaia archive,
 ## Installation
 
 ```bash
-uv pip install gaiahealpixcache
+pip install gaiahealpixcache
 ```
 
 Or from source:
 
 ```bash
 git clone https://github.com/betoule/gaiahealpixcache.git
+cd gaiahealpixcache
 uv venv
 source .venv/bin/activate
 uv pip install -e .
 ```
 
-## Usage
-
-### Query sources around sky coordinates
+## Quick Start
 
 ```python
 import gaiahealpixcache
 
+# Query sources around a sky position
 sources = gaiahealpixcache.query(ra_deg=76.377, dec_deg=52.831, radius_arcmin=30)
-print(len(sources))
+print(f"{len(sources)} sources found")
 print(sources["source_id"][:5])
-print(sources["phot_g_mean_flux"][:5])
+print(sources["phot_g_mean_mag"][:5])
 ```
 
-### Convert to topocentric coordinates
+Tiles are downloaded on first access and cached as compressed NumPy arrays for fast subsequent queries.
+
+## Products
+
+A *product* defines which columns are loaded from the Gaia archive and which rows are kept. Multiple products can coexist, each with its own cache namespace.
+
+### Default Products
+
+| Product | Description | Filter |
+|---|---|---|
+| `source` | Full Gaia source catalog (selected columns) | none |
+| `bright_sources` | Sources with G < 16 | `phot_g_mean_mag < 16` |
+
+```python
+# Use the bright_sources product to save disk space
+sources = gaiahealpixcache.query(76.377, 52.831, product="bright_sources")
+```
+
+The default column set is:
+`source_id`, `ra`, `ra_error`, `dec`, `dec_error`, `parallax`, `parallax_error`,
+`pmra`, `pmra_error`, `pmdec`, `pmdec_error`, `phot_g_mean_mag`, `phot_bp_mean_mag`,
+`phot_rp_mean_mag`, `radial_velocity`, `radial_velocity_error`.
+
+### Custom Products
+
+Define a product with a custom column selection and optional row filter:
+
+```python
+from gaiahealpixcache import GaiaProduct, register_product, query
+
+my_product = GaiaProduct(
+    name="astrometry_lite",
+    url="https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_source/",
+    md5sum_file="_MD5SUM.txt",
+    file_prefix="GaiaSource_",
+    file_ext=".csv.gz",
+    columns=["source_id", "ra", "dec", "parallax", "pmra", "pmdec"],
+    where="(parallax > 0) & (phot_g_mean_mag < 18)",
+)
+register_product(my_product)
+
+sources = query(76.377, 52.831, product="astrometry_lite")
+```
+
+Products are persisted to `~/.config/gaiahealpixcache/products/` and survive sessions.
+
+```python
+# List all available products
+print(gaiahealpixcache.list_products())
+
+# Remove a custom product (also cleans its cached data)
+gaiahealpixcache.unregister_product("astrometry_lite")
+```
+
+### Filter Expressions (`where`)
+
+The `where` field accepts a Python boolean expression evaluated over the loaded data. Column names refer to Gaia column names:
+
+```python
+# Good proper-motion candidates
+where="abs(pmra) > 10 and abs(pmdec) > 10"
+
+# Bright sources with parallax
+where="(phot_g_mean_mag < 14) & (parallax > 0)"
+
+# Use numpy functions
+where="np.isfinite(phot_g_mean_mag) & np.isfinite(parallax)"
+```
+
+Filter expressions are validated by AST analysis and evaluated in a restricted namespace (column arrays + `np` only). No filesystem access or arbitrary imports are possible.
+
+## Coordinate Transforms
+
+### Topocentric Conversion
+
+Convert ICRS catalog coordinates to apparent topocentric positions:
 
 ```python
 import gaiahealpixcache
 from astropy.time import Time
 
 now = Time.now()
-mjd = now.mjd
 
 sources = gaiahealpixcache.query(ra_deg=76.377, dec_deg=52.831)
 
 topo = gaiahealpixcache.gaia_to_topocentric(
     sources,
-    mjd=mjd,
+    mjd=now.mjd,
     lon_deg=5.71,
     lat_deg=43.93,
     height_m=640.0,
@@ -54,7 +128,17 @@ print(topo["ra_apparent_deg"][:5])
 print(topo["alt_deg"][:5])
 ```
 
-### Manage cache
+### Coordinate Normalization
+
+Coordinates outside the standard convention (RA in [0, 360), Dec in [-90, 90]) are
+automatically normalized. You can also call the helper directly:
+
+```python
+ra, dec = gaiahealpixcache.conform_coordinates(-10.0, 95.0)
+# ra=350.0, dec=85.0
+```
+
+## Cache Management
 
 ```python
 cache_dir = gaiahealpixcache.get_cache_dir()
@@ -63,19 +147,33 @@ print(f"Cache location: {cache_dir}")
 gaiahealpixcache.clear_cache()
 ```
 
-## API
+Cached tiles are stored as `.npy` files named with the product's configuration hash, so different products and filters maintain separate cache entries.
+
+## Concurrency
+
+Each cached tile is protected by a file-based lock (`fcntl.flock` on Unix). When two
+processes or threads request the same tile simultaneously, only one downloads it; the
+other waits and loads the result once it's ready. Downloads use atomic rename — if a
+download is interrupted, the partial file is discarded, preventing corrupted cache entries.
+
+## API Reference
 
 | Function | Description |
 |---|---|
-| `query(ra_deg, dec_deg, radius_arcmin)` | Query Gaia sources within a circular region |
+| `query(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia sources within a circular region |
 | `gaia_to_topocentric(catalog, mjd, ...)` | Convert ICRS catalog to topocentric coordinates |
 | `center_at_date(ra, dec, mjd)` | Get apparent RA/Dec at a given date |
+| `conform_coordinates(ra, dec)` | Normalize coordinates to standard convention |
 | `get_pixlist(ras, decs, level)` | Get HEALPix pixels for coordinates |
-| `get_pix_range(ra, dec)` | Get Gaia file pixel ranges for coordinates |
-| `retrieve_gaia_data(pixel_range)` | Download/cache a single Gaia tile |
+| `get_pix_range(ra, dec, product)` | Get Gaia file pixel ranges for coordinates |
+| `retrieve_gaia_data(pixel_range, product)` | Download/cache a single Gaia tile |
 | `haversine(ra1, dec1, ra2, dec2)` | Great-circle distance in degrees |
 | `get_cache_dir()` | Get cache directory path |
 | `clear_cache()` | Remove all cached data |
+| `get_product(name)` | Look up a product by name |
+| `list_products()` | List all available product names |
+| `register_product(product)` | Register and persist a custom product |
+| `unregister_product(name)` | Remove a custom product and its cache |
 
 ## License
 

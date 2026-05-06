@@ -7,8 +7,8 @@ import pytest
 
 from gaiahealpixcache.gaia import (
     COLUMNS_OF_INTEREST,
-    get_pixlist,
     get_pix_range,
+    get_pixlist,
     haversine,
     parse_md5sum,
     query,
@@ -75,15 +75,36 @@ def test_parse_md5sum():
         os.unlink(tmpfile)
 
 
-def test_read_gaia():
-    from gaiahealpixcache.gaia import COLUMNS_OF_INTEREST
+def test_parse_md5sum_custom_prefix():
+    lines = [
+        "abc123  XPContMeanSpec_0-63.ecsv.gz\n",
+        "def456  XPContMeanSpec_64-127.ecsv.gz\n",
+    ]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        f.writelines(lines)
+        tmpfile = f.name
 
+    try:
+        bins, ranges = parse_md5sum(
+            tmpfile, file_prefix="XPContMeanSpec_", file_ext=".ecsv.gz"
+        )
+        assert bins == [0, 64]
+        assert ranges == ["0-63", "64-127"]
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia():
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
+    comment = b"# %ECSV 1.0\n"
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
     data_values = b",".join(b"1.0" for _ in COLUMNS_OF_INTEREST) + b"\n"
     null_values = b",".join(b"null" for _ in COLUMNS_OF_INTEREST) + b"\n"
     data_lines = [data_values, null_values]
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
         gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(comment)
         gz.write(header)
         for line in data_lines:
             gz.write(line)
@@ -100,11 +121,116 @@ def test_read_gaia():
         os.unlink(tmpfile)
 
 
+def test_read_gaia_where_filter():
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
+    header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+    bright = (
+        b",".join(
+            b"10.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"1.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    faint = (
+        b",".join(
+            b"18.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"1.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(bright)
+        gz.write(faint)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        result = read_gaia(tmpfile, where="phot_g_mean_mag < 16")
+        assert len(result) == 1
+        assert result["phot_g_mean_mag"][0] == 10.0
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia_where_complex():
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
+    header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+    row1 = (
+        b",".join(
+            b"10.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"5.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    row2 = (
+        b",".join(
+            b"18.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"30.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(row1)
+        gz.write(row2)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        result = read_gaia(tmpfile, where="(phot_g_mean_mag < 16) & (parallax > 0)")
+        assert len(result) == 1
+        assert result["phot_g_mean_mag"][0] == 10.0
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_validate_where_safe():
+    from gaiahealpixcache.gaia import _validate_where
+
+    _validate_where("phot_g_mean_mag < 16")
+    _validate_where("(phot_g_mean_mag < 16) & (parallax > 0)")
+    _validate_where("np.isnan(phot_g_mean_mag)")
+    _validate_where("(ra > 0) or (dec < 45)")
+
+
+def test_validate_where_dangerous():
+    from gaiahealpixcache.gaia import _validate_where
+
+    with pytest.raises(ValueError):
+        _validate_where("__import__('os')")
+    with pytest.raises(ValueError):
+        _validate_where("open('/etc/passwd').read()")
+    with pytest.raises(ValueError):
+        _validate_where("exec('print(1)')")
+    with pytest.raises(ValueError):
+        _validate_where("os.system('ls')")
+
+
+def test_safe_eval_where():
+    import numpy as np
+    from gaiahealpixcache.gaia import _safe_eval_where
+
+    data = np.rec.fromarrays(
+        [np.array([10.0, 18.0, 14.0]), np.array([5.0, -1.0, 3.0])],
+        names=["phot_g_mean_mag", "parallax"],
+    )
+    mask = _safe_eval_where("phot_g_mean_mag < 16", data)
+    assert mask.sum() == 2
+
+    mask = _safe_eval_where("(phot_g_mean_mag < 16) & (parallax > 0)", data)
+    assert mask.sum() == 2
+
+
 def test_columns_of_interest():
     assert "source_id" in COLUMNS_OF_INTEREST
     assert "ra" in COLUMNS_OF_INTEREST
     assert "dec" in COLUMNS_OF_INTEREST
-    assert len(COLUMNS_OF_INTEREST) == 19
+    assert len(COLUMNS_OF_INTEREST) == 16
 
 
 def test_get_pix_range():
@@ -140,6 +266,19 @@ def test_query(mocker):
         ),
     )
     result = query(76.377, 52.831, radius_arcmin=30)
+    assert len(result) >= 0
+    mock_retrieve.assert_called()
+
+
+def test_query_with_product(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.377, 76.5]), np.array([52.831, 53.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query(76.377, 52.831, radius_arcmin=30, product="source")
     assert len(result) >= 0
     mock_retrieve.assert_called()
 
@@ -180,3 +319,57 @@ def test_retrieve_gaia_data_download(mocker):
     mock_save.assert_called_once()
     mock_remove.assert_called_once()
     assert len(result) == 1
+
+
+def test_cache_lock_context_manager(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+
+    lock_path = str(tmp_path / "test.lock")
+    lock = _CacheLock(lock_path)
+    with lock:
+        assert os.path.exists(lock_path)
+    assert not os.path.exists(lock_path)
+
+
+def test_cache_lock_double_acquire_timeout(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+    import threading
+
+    lock_path = str(tmp_path / "test.lock")
+    lock1 = _CacheLock(lock_path, timeout=5.0)
+    lock2 = _CacheLock(lock_path, timeout=0.3)
+
+    lock1.acquire()
+    try:
+        with pytest.raises(TimeoutError):
+            lock2.acquire()
+    finally:
+        lock1.release()
+
+
+def test_cache_lock_concurrent_access(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+    import threading, time
+
+    lock_path = str(tmp_path / "test.lock")
+    max_active: list[int] = [0]
+    active_count: list[int] = [0]
+    count_lock = threading.Lock()
+
+    def worker():
+        with _CacheLock(lock_path, timeout=5.0):
+            with count_lock:
+                active_count[0] += 1
+                if active_count[0] > max_active[0]:
+                    max_active[0] = active_count[0]
+            time.sleep(0.05)
+            with count_lock:
+                active_count[0] -= 1
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert max_active[0] == 1
