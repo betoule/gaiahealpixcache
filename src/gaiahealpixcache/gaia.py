@@ -6,6 +6,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .cache import cached_download, get_cache_dir
+from .celestial import conform_coordinates
 from .products import COLUMNS_OF_INTEREST, GaiaProduct, get_product
 
 _md5sum_cache: dict[str, str | None] = {}
@@ -71,10 +72,10 @@ def get_pixlist(ras, decs, level=8):
     list[int]
         List of HEALPix pixel indices in [0, 786431].
     """
+    radecs = [conform_coordinates(ra, dec) for ra, dec in zip(ras, decs)]
     nside = healpy.order2nside(level)
     pixlist = [
-        healpy.ang2pix(nside, ra, dec, lonlat=True, nest=True)
-        for ra, dec in zip(ras, decs)
+        healpy.ang2pix(nside, ra, dec, lonlat=True, nest=True) for ra, dec in radecs
     ]
     return list(np.unique(pixlist))
 
