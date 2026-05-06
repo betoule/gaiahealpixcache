@@ -1,7 +1,7 @@
 """Gaia HEALPix Cache -- download and cache Gaia catalog data for offline work."""
 
 from .cache import clear_cache, get_cache_dir
-from .celestial import center_at_date, gaia_to_topocentric
+from .celestial import center_at_date, conform_coordinates, gaia_to_topocentric
 from .gaia import (
     get_pix_range,
     get_pixlist,
@@ -24,6 +24,7 @@ __all__ = [
     "GaiaProduct",
     "center_at_date",
     "clear_cache",
+    "conform_coordinates",
     "get_cache_dir",
     "get_pix_range",
     "get_pixlist",

@@ -212,3 +212,57 @@ def test_retrieve_gaia_data_download(mocker):
     mock_save.assert_called_once()
     mock_remove.assert_called_once()
     assert len(result) == 1
+
+
+def test_cache_lock_context_manager(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+
+    lock_path = str(tmp_path / "test.lock")
+    lock = _CacheLock(lock_path)
+    with lock:
+        assert os.path.exists(lock_path)
+    assert not os.path.exists(lock_path)
+
+
+def test_cache_lock_double_acquire_timeout(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+    import threading
+
+    lock_path = str(tmp_path / "test.lock")
+    lock1 = _CacheLock(lock_path, timeout=5.0)
+    lock2 = _CacheLock(lock_path, timeout=0.3)
+
+    lock1.acquire()
+    try:
+        with pytest.raises(TimeoutError):
+            lock2.acquire()
+    finally:
+        lock1.release()
+
+
+def test_cache_lock_concurrent_access(tmp_path):
+    from gaiahealpixcache.gaia import _CacheLock
+    import threading, time
+
+    lock_path = str(tmp_path / "test.lock")
+    max_active: list[int] = [0]
+    active_count: list[int] = [0]
+    count_lock = threading.Lock()
+
+    def worker():
+        with _CacheLock(lock_path, timeout=5.0):
+            with count_lock:
+                active_count[0] += 1
+                if active_count[0] > max_active[0]:
+                    max_active[0] = active_count[0]
+            time.sleep(0.05)
+            with count_lock:
+                active_count[0] -= 1
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert max_active[0] == 1
