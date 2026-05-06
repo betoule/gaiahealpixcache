@@ -121,6 +121,111 @@ def test_read_gaia():
         os.unlink(tmpfile)
 
 
+def test_read_gaia_where_filter():
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
+    header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+    bright = (
+        b",".join(
+            b"10.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"1.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    faint = (
+        b",".join(
+            b"18.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"1.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(bright)
+        gz.write(faint)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        result = read_gaia(tmpfile, where="phot_g_mean_mag < 16")
+        assert len(result) == 1
+        assert result["phot_g_mean_mag"][0] == 10.0
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia_where_complex():
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
+    header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+    row1 = (
+        b",".join(
+            b"10.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"5.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    row2 = (
+        b",".join(
+            b"18.0" if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag") else b"30.0"
+            for i, c in enumerate(COLUMNS_OF_INTEREST)
+        )
+        + b"\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(row1)
+        gz.write(row2)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        result = read_gaia(tmpfile, where="(phot_g_mean_mag < 16) & (parallax > 0)")
+        assert len(result) == 1
+        assert result["phot_g_mean_mag"][0] == 10.0
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_validate_where_safe():
+    from gaiahealpixcache.gaia import _validate_where
+
+    _validate_where("phot_g_mean_mag < 16")
+    _validate_where("(phot_g_mean_mag < 16) & (parallax > 0)")
+    _validate_where("np.isnan(phot_g_mean_mag)")
+    _validate_where("(ra > 0) or (dec < 45)")
+
+
+def test_validate_where_dangerous():
+    from gaiahealpixcache.gaia import _validate_where
+
+    with pytest.raises(ValueError):
+        _validate_where("__import__('os')")
+    with pytest.raises(ValueError):
+        _validate_where("open('/etc/passwd').read()")
+    with pytest.raises(ValueError):
+        _validate_where("exec('print(1)')")
+    with pytest.raises(ValueError):
+        _validate_where("os.system('ls')")
+
+
+def test_safe_eval_where():
+    import numpy as np
+    from gaiahealpixcache.gaia import _safe_eval_where
+
+    data = np.rec.fromarrays(
+        [np.array([10.0, 18.0, 14.0]), np.array([5.0, -1.0, 3.0])],
+        names=["phot_g_mean_mag", "parallax"],
+    )
+    mask = _safe_eval_where("phot_g_mean_mag < 16", data)
+    assert mask.sum() == 2
+
+    mask = _safe_eval_where("(phot_g_mean_mag < 16) & (parallax > 0)", data)
+    assert mask.sum() == 2
+
+
 def test_columns_of_interest():
     assert "source_id" in COLUMNS_OF_INTEREST
     assert "ra" in COLUMNS_OF_INTEREST

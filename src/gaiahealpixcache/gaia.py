@@ -1,3 +1,4 @@
+import ast
 import gzip
 import os
 
@@ -8,6 +9,85 @@ from tqdm import tqdm
 from .cache import cached_download, get_cache_dir
 from .celestial import conform_coordinates
 from .products import COLUMNS_OF_INTEREST, GaiaProduct, get_product
+
+_DANGEROUS_NAMES = {
+    "__import__",
+    "open",
+    "exec",
+    "eval",
+    "compile",
+    "__builtins__",
+    "os",
+    "sys",
+    "subprocess",
+    "importlib",
+    "getattr",
+    "setattr",
+    "delattr",
+    "dir",
+    "vars",
+    "globals",
+    "locals",
+    "breakpoint",
+    "input",
+    "print",
+}
+
+
+def _validate_where(expr: str):
+    """Validate a `where` filter expression using AST analysis.
+
+    Only allows safe operations: comparisons, arithmetic, boolean ops,
+    numpy function calls, and numeric/string literals.
+
+    Parameters
+    ----------
+    expr : str
+        Filter expression to validate.
+
+    Raises
+    ------
+    ValueError
+        If the expression contains disallowed constructs.
+    """
+    tree = ast.parse(expr, mode="eval")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if node.id in _DANGEROUS_NAMES:
+                raise ValueError(f"Disallowed name in filter expression: {node.id}")
+        elif isinstance(node, ast.Attribute):
+            if node.attr.startswith("_"):
+                raise ValueError(
+                    f"Disallowed attribute access in filter expression: {node.attr}"
+                )
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _DANGEROUS_NAMES:
+                raise ValueError(
+                    f"Disallowed function call in filter expression: {node.func.id}"
+                )
+
+
+def _safe_eval_where(expr: str, data: np.recarray) -> np.ndarray:
+    """Safely evaluate a `where` filter expression on a recarray.
+
+    Parameters
+    ----------
+    expr : str
+        Filter expression (e.g., "phot_g_mean_mag < 16").
+    data : np.recarray
+        Loaded Gaia data.
+
+    Returns
+    -------
+    np.ndarray[bool]
+        Boolean mask for rows matching the filter.
+    """
+    _validate_where(expr)
+    safe_ns: dict = {"np": np}
+    for col in data.dtype.names:
+        safe_ns[col] = data[col]
+    return eval(expr, {"__builtins__": {}}, safe_ns)  # noqa: S307
 
 
 class _CacheLock:
@@ -192,13 +272,17 @@ def retrieve_gaia_data(
 
         rawname = f"{prod.file_prefix}{pixel_range}{prod.file_ext}"
         sampled = cached_download(f"{prod.url}{rawname}")
-        sources = read_gaia(sampled, prod.columns)
+        sources = read_gaia(sampled, prod.columns, prod.where)
         np.save(fname, sources)
         os.remove(sampled)
         return sources
 
 
-def read_gaia(fname: str, columns: list[str] | None = None) -> np.recarray:
+def read_gaia(
+    fname: str,
+    columns: list[str] | None = None,
+    where: str | None = None,
+) -> np.recarray:
     """Parse a gzipped Gaia CSV file into a numpy recarray.
 
     Parameters
@@ -207,6 +291,9 @@ def read_gaia(fname: str, columns: list[str] | None = None) -> np.recarray:
         Path to the gzipped CSV file.
     columns : list[str], optional
         Columns to retain. Uses COLUMNS_OF_INTEREST if not given.
+    where : str | None, optional
+        Filter expression evaluated as a boolean mask. Only matching rows
+        are returned.
 
     Returns
     -------
@@ -237,7 +324,11 @@ def read_gaia(fname: str, columns: list[str] | None = None) -> np.recarray:
             continue
         flux.append(process(line))
 
-    return np.rec.fromrecords(flux, names=keys)
+    result = np.rec.fromrecords(flux, names=keys)
+    if where is not None:
+        mask = _safe_eval_where(where, result)
+        result = result[mask]
+    return result
 
 
 def haversine(ra1, dec1, ra2, dec2):

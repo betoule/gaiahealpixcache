@@ -71,6 +71,7 @@ disable = [
     "R0917",  # too many positional arguments
     "R0914",  # too many local variables
     "E1101",  # no-member (astropy units are dynamic)
+    "W0123",  # eval-used (safe eval with restricted namespace for where filter)
 ]
 
 [tool.pylint.basic]

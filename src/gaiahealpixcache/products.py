@@ -23,6 +23,11 @@ class GaiaProduct:
         Extension of data files (e.g., ".csv.gz").
     columns : list[str]
         Columns to retain when parsing CSV files.
+    where : str | None
+        Optional filter expression evaluated as a boolean mask on the loaded
+        recarray. Only rows where the expression evaluates to True are kept
+        in the cached .npy file. Column names refer to Gaia column names
+        (e.g., "phot_g_mean_mag < 16").
     """
 
     name: str
@@ -31,13 +36,14 @@ class GaiaProduct:
     file_prefix: str
     file_ext: str
     columns: list[str] = field(default_factory=list)
+    where: str | None = field(default=None)
 
     def config_hash(self):
         """Return a short hash of the product configuration.
 
-        Used to make cache filenames unique per product+columns combo.
+        Used to make cache filenames unique per product+columns+filter combo.
         """
-        config_str = f"{self.name}:{','.join(sorted(self.columns))}"
+        config_str = f"{self.name}:{','.join(sorted(self.columns))}:{self.where or ''}"
         return hashlib.md5(config_str.encode()).hexdigest()[:8]
 
     def to_dict(self):
@@ -80,6 +86,15 @@ DEFAULT_PRODUCTS: dict[str, "GaiaProduct"] = {
         file_ext=".csv.gz",
         columns=COLUMNS_OF_INTEREST,
     ),
+    "bright_sources": GaiaProduct(
+        name="bright_sources",
+        url="https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_source/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="GaiaSource_",
+        file_ext=".csv.gz",
+        columns=COLUMNS_OF_INTEREST,
+        where="phot_g_mean_mag < 16",
+    ),
 }
 
 
@@ -116,7 +131,7 @@ def _load_user_products() -> dict[str, "GaiaProduct"]:
                 data = json.load(fid)
             prod = GaiaProduct.from_dict(data)
             result[prod.name] = prod
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             print(f"Warning: failed to load product from {fn}: {e}")
     return result
 

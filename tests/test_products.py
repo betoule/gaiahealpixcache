@@ -4,6 +4,7 @@ import os
 import pytest
 
 from gaiahealpixcache.products import (
+    COLUMNS_OF_INTEREST,
     DEFAULT_PRODUCTS,
     GaiaProduct,
     _cleanup_cache,
@@ -376,8 +377,10 @@ def test_load_user_products_missing_key(tmp_path, capsys):
     orig = os.environ.get("XDG_CONFIG_HOME")
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     try:
-        with pytest.raises(TypeError):
-            _load_user_products()
+        result = _load_user_products()
+        assert "incomplete" not in result
+        captured = capsys.readouterr()
+        assert "Warning:" in captured.out
     finally:
         if orig is not None:
             os.environ["XDG_CONFIG_HOME"] = orig
@@ -414,3 +417,42 @@ def test_cleanup_cache_no_dir(monkeypatch):
         columns=["ra"],
     )
     _cleanup_cache(prod)
+
+
+# ---------------------------------------------------------------------------
+# Bright sources default product
+# ---------------------------------------------------------------------------
+
+
+def test_bright_sources_exists():
+    assert "bright_sources" in DEFAULT_PRODUCTS
+    bs = DEFAULT_PRODUCTS["bright_sources"]
+    assert bs.where == "phot_g_mean_mag < 16"
+    assert bs.columns == COLUMNS_OF_INTEREST
+
+
+def test_bright_sources_distinct_hash():
+    source_hash = DEFAULT_PRODUCTS["source"].config_hash()
+    bright_hash = DEFAULT_PRODUCTS["bright_sources"].config_hash()
+    assert source_hash != bright_hash
+
+
+def test_bright_sources_registry():
+    products = list_products()
+    assert "bright_sources" in products
+
+
+def test_gaiaproduct_where_roundtrip():
+    prod = GaiaProduct(
+        name="test_where",
+        url="http://example.com/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="Test_",
+        file_ext=".csv.gz",
+        columns=["ra", "dec"],
+        where="phot_g_mean_mag < 15",
+    )
+    data = prod.to_dict()
+    assert data["where"] == "phot_g_mean_mag < 15"
+    restored = GaiaProduct.from_dict(data)
+    assert restored.where == "phot_g_mean_mag < 15"
