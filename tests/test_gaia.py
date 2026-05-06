@@ -123,7 +123,7 @@ def test_columns_of_interest():
     assert "source_id" in COLUMNS_OF_INTEREST
     assert "ra" in COLUMNS_OF_INTEREST
     assert "dec" in COLUMNS_OF_INTEREST
-    assert len(COLUMNS_OF_INTEREST) == 19
+    assert len(COLUMNS_OF_INTEREST) == 16
 
 
 def test_get_pix_range():

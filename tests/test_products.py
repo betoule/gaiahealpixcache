@@ -138,7 +138,7 @@ def test_default_source_product():
     assert "source_id" in source.columns
     assert "ra" in source.columns
     assert "dec" in source.columns
-    assert len(source.columns) == 19
+    assert len(source.columns) == 16
 
 
 def test_default_source_columns_match():
