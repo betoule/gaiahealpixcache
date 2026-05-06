@@ -6,49 +6,35 @@ import numpy as np
 from tqdm import tqdm
 
 from .cache import cached_download, get_cache_dir
+from .products import COLUMNS_OF_INTEREST, GaiaProduct, get_product
 
-GAIA_SOURCE_URL = "https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_source/"
-MD5SUM_URL = f"{GAIA_SOURCE_URL}_MD5SUM.txt"
-
-COLUMNS_OF_INTEREST = [
-    "source_id",
-    "ra",
-    "ra_error",
-    "dec",
-    "dec_error",
-    "parallax",
-    "parallax_error",
-    "pmra",
-    "pmra_error",
-    "pmdec",
-    "pmdec_error",
-    "phot_g_mean_flux",
-    "phot_g_mean_flux_error",
-    "phot_bp_mean_flux",
-    "phot_bp_mean_flux_error",
-    "phot_rp_mean_flux",
-    "phot_rp_mean_flux_error",
-    "radial_velocity",
-    "radial_velocity_error",
-]
-
-_md5sum_path = None
+_md5sum_cache: dict[str, str | None] = {}
 
 
-def _get_md5sum_path():
-    global _md5sum_path
-    if _md5sum_path is None:
-        _md5sum_path = cached_download(MD5SUM_URL)
-    return _md5sum_path
+def _resolve_product(product: str | GaiaProduct | None = None) -> GaiaProduct:
+    if product is None or isinstance(product, str):
+        return get_product(product or "source")
+    return product
 
 
-def parse_md5sum(fn):
+def _get_md5sum_path(product: GaiaProduct) -> str:
+    if product.name not in _md5sum_cache or _md5sum_cache[product.name] is None:
+        md5url = f"{product.url}{product.md5sum_file}"
+        _md5sum_cache[product.name] = cached_download(md5url)
+    return _md5sum_cache[product.name]
+
+
+def parse_md5sum(fn, file_prefix="GaiaSource_", file_ext=".csv.gz"):
     """Use md5sum file to get the full list of files.
 
     Parameters
     ----------
     fn : str
         Path to md5sum file from the Gaia source directory.
+    file_prefix : str, optional
+        Prefix used in data filenames (default: "GaiaSource_").
+    file_ext : str, optional
+        Extension of data files (default: ".csv.gz").
 
     Returns
     -------
@@ -60,9 +46,9 @@ def parse_md5sum(fn):
     with open(fn, encoding="utf-8") as fid:
         lines = fid.readlines()
     ranges = [
-        l.split("GaiaSource_")[-1].split(".csv.gz")[0]
+        l.split(file_prefix)[-1].split(file_ext)[0]
         for l in lines
-        if l.endswith(".gz\n")
+        if l.endswith(f"{file_ext}\n")
     ]
     bins = [int(b.split("-")[0]) for b in ranges]
     return bins, ranges
@@ -93,7 +79,7 @@ def get_pixlist(ras, decs, level=8):
     return list(np.unique(pixlist))
 
 
-def get_pix_range(ra, dec):
+def get_pix_range(ra, dec, product: str | GaiaProduct | None = None):
     """Return a list of pixel ranges matching indexing of Gaia files.
 
     Parameters
@@ -102,20 +88,33 @@ def get_pix_range(ra, dec):
         Right ascension coordinates.
     dec : list[float]
         Declination coordinates.
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "source").
 
     Returns
     -------
     list[str]
         Pixel range strings covered by the given sky coordinates.
     """
+    prod = _resolve_product(product)
     pixlist = get_pixlist(ra, dec)
-    bins, ranges = parse_md5sum(_get_md5sum_path())
+    md5path = _get_md5sum_path(prod)
+    bins, ranges = parse_md5sum(md5path, prod.file_prefix, prod.file_ext)
     range_index = np.digitize(pixlist, bins) - 1
     range_index = np.unique(range_index)
     return [ranges[i] for i in range_index]
 
 
-def retrieve_gaia_data(pixel_range):
+def _cache_filename(product: GaiaProduct, pixel_range: str) -> str:
+    cfg_hash = product.config_hash()
+    stem = product.file_prefix.rstrip("_").rstrip(".csv").rstrip(".gz")
+    return os.path.join(get_cache_dir(), f"{stem}_{pixel_range}_{cfg_hash}.npy")
+
+
+def retrieve_gaia_data(
+    pixel_range: str,
+    product: str | GaiaProduct | None = None,
+) -> np.recarray:
     """Load Gaia data for a given pixel range, downloading and caching if needed.
 
     Downloads the CSV.gz file, converts to compressed numpy format, and caches
@@ -125,37 +124,46 @@ def retrieve_gaia_data(pixel_range):
     ----------
     pixel_range : str
         Pixel range string (e.g., '0-63').
-
-    Returns
-    -------
-    np.recarray
-        Structured array with columns from COLUMNS_OF_INTEREST.
-    """
-    fname = os.path.join(get_cache_dir(), f"GaiaSource_{pixel_range}.npy")
-    if os.path.exists(fname):
-        return np.load(fname, allow_pickle=True)
-
-    rawname = f"GaiaSource_{pixel_range}.csv.gz"
-    sampled = cached_download(f"{GAIA_SOURCE_URL}{rawname}")
-    sources = read_gaia(sampled)
-    np.save(fname, sources)
-    os.remove(sampled)
-    return sources
-
-
-def read_gaia(fname):
-    """Parse a gzipped Gaia CSV file into a numpy recarray.
-
-    Parameters
-    ----------
-    fname : str
-        Path to the gzipped CSV file.
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "source").
 
     Returns
     -------
     np.recarray
         Structured array with selected columns.
     """
+    prod = _resolve_product(product)
+    fname = _cache_filename(prod, pixel_range)
+
+    if os.path.exists(fname):
+        return np.load(fname, allow_pickle=True)
+
+    rawname = f"{prod.file_prefix}{pixel_range}{prod.file_ext}"
+    sampled = cached_download(f"{prod.url}{rawname}")
+    sources = read_gaia(sampled, prod.columns)
+    np.save(fname, sources)
+    os.remove(sampled)
+    return sources
+
+
+def read_gaia(fname: str, columns: list[str] | None = None) -> np.recarray:
+    """Parse a gzipped Gaia CSV file into a numpy recarray.
+
+    Parameters
+    ----------
+    fname : str
+        Path to the gzipped CSV file.
+    columns : list[str], optional
+        Columns to retain. Uses COLUMNS_OF_INTEREST if not given.
+
+    Returns
+    -------
+    np.recarray
+        Structured array with selected columns.
+    """
+    if columns is None:
+        columns = COLUMNS_OF_INTEREST
+
     fid = gzip.GzipFile(fname)
     lines = tqdm(fid.readlines())
     flux = []
@@ -171,9 +179,9 @@ def read_gaia(fname):
             continue
         if line[0] == 115:
             keys = [k.strip().decode() for k in line.split(b",")]
-            keep_index = [keys.index(k) for k in keys if k in COLUMNS_OF_INTEREST]
+            keep_index = [keys.index(k) for k in keys if k in columns]
             keys = [keys[i] for i in keep_index]
-            assert len(keys) == len(COLUMNS_OF_INTEREST), "missing column"
+            assert len(keys) == len(columns), "missing column"
             continue
         flux.append(process(line))
 
@@ -210,7 +218,12 @@ def haversine(ra1, dec1, ra2, dec2):
     )
 
 
-def query(ra_deg, dec_deg, radius_arcmin=30):
+def query(
+    ra_deg: float,
+    dec_deg: float,
+    radius_arcmin: float = 30,
+    product: str | GaiaProduct | None = None,
+) -> np.recarray:
     """Query Gaia sources within a circular region around given coordinates.
 
     Parameters
@@ -221,12 +234,15 @@ def query(ra_deg, dec_deg, radius_arcmin=30):
         Declination center in degrees.
     radius_arcmin : float, optional
         Search radius in arcminutes (default: 30).
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "source").
 
     Returns
     -------
     np.recarray
         Structured array of Gaia sources within the search radius.
     """
+    prod = _resolve_product(product)
     rad = radius_arcmin / 60
     cdec = np.cos(np.radians(dec_deg))
     dra, ddec = np.meshgrid(
@@ -234,10 +250,10 @@ def query(ra_deg, dec_deg, radius_arcmin=30):
         np.linspace(dec_deg - rad, dec_deg + rad, 5),
     )
 
-    pranges = get_pix_range(dra, ddec)
+    pranges = get_pix_range(dra, ddec, product=prod)
     all_sources = []
     for pixel in pranges:
-        sources = retrieve_gaia_data(pixel)
+        sources = retrieve_gaia_data(pixel, product=prod)
         in_radius = haversine(sources["ra"], sources["dec"], ra_deg, dec_deg) < rad
         all_sources.append(sources[in_radius])
     return np.hstack(all_sources)

@@ -7,8 +7,8 @@ import pytest
 
 from gaiahealpixcache.gaia import (
     COLUMNS_OF_INTEREST,
-    get_pixlist,
     get_pix_range,
+    get_pixlist,
     haversine,
     parse_md5sum,
     query,
@@ -75,8 +75,27 @@ def test_parse_md5sum():
         os.unlink(tmpfile)
 
 
+def test_parse_md5sum_custom_prefix():
+    lines = [
+        "abc123  XPContMeanSpec_0-63.ecsv.gz\n",
+        "def456  XPContMeanSpec_64-127.ecsv.gz\n",
+    ]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        f.writelines(lines)
+        tmpfile = f.name
+
+    try:
+        bins, ranges = parse_md5sum(
+            tmpfile, file_prefix="XPContMeanSpec_", file_ext=".ecsv.gz"
+        )
+        assert bins == [0, 64]
+        assert ranges == ["0-63", "64-127"]
+    finally:
+        os.unlink(tmpfile)
+
+
 def test_read_gaia():
-    from gaiahealpixcache.gaia import COLUMNS_OF_INTEREST
+    from gaiahealpixcache.products import COLUMNS_OF_INTEREST
 
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
     data_values = b",".join(b"1.0" for _ in COLUMNS_OF_INTEREST) + b"\n"
@@ -140,6 +159,19 @@ def test_query(mocker):
         ),
     )
     result = query(76.377, 52.831, radius_arcmin=30)
+    assert len(result) >= 0
+    mock_retrieve.assert_called()
+
+
+def test_query_with_product(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.377, 76.5]), np.array([52.831, 53.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query(76.377, 52.831, radius_arcmin=30, product="source")
     assert len(result) >= 0
     mock_retrieve.assert_called()
 
