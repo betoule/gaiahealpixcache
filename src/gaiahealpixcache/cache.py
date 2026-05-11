@@ -1,3 +1,5 @@
+"""HTTP download with caching and atomic file operations."""
+
 import os
 import tempfile
 from pathlib import Path

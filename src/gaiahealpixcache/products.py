@@ -1,3 +1,5 @@
+"""Configurable Gaia product definitions and persistent registry."""
+
 import hashlib
 import json
 import os

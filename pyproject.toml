@@ -59,19 +59,17 @@ target-version = ["py311", "py312", "py313"]
 
 [tool.pylint.messages_control]
 disable = [
-    "C0114",  # missing-module-docstring
-    "C0115",  # missing-class-docstring
-    "C0116",  # missing-function-docstring
-    "C0103",  # conventional name violations (allows hPa, etc.)
-    "C0415",  # import outside toplevel (lazy imports are intentional)
+    "C0116",  # missing-function-docstring (private helpers; public API documented in README)
+    "C0103",  # conventional name violations (allows hPa, pmra, mjd, etc.)
+    "C0415",  # import outside toplevel (lazy imports for fcntl, requests, MD5SUM cache)
     "C0206",  # consider iterating with .items() (dict comprehension pattern)
-    "W0603",  # global statement (used for lazy module-level caching)
+    "W0603",  # global statement (lazy module-level registry initialization)
     "W1514",  # unspecified encoding (binary mode, not needed)
-    "R0913",  # too many arguments
-    "R0917",  # too many positional arguments
-    "R0914",  # too many local variables
+    "R0913",  # too many arguments (gaia_to_topocentric needs many params)
+    "R0917",  # too many positional arguments (same)
+    "R0914",  # too many local variables (data processing functions)
     "E1101",  # no-member (astropy units are dynamic)
-    "W0123",  # eval-used (safe eval with restricted namespace for where filter)
+    "W0123",  # eval-used (safe eval with AST validation for where filter)
 ]
 
 [tool.pylint.basic]

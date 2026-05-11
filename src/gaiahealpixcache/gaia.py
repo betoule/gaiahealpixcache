@@ -1,3 +1,5 @@
+"""Gaia data retrieval, HEALPix partitioning, and cache management."""
+
 import ast
 import gzip
 import os
