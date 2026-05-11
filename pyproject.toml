@@ -68,6 +68,7 @@ disable = [
     "R0913",  # too many arguments (gaia_to_topocentric needs many params)
     "R0917",  # too many positional arguments (same)
     "R0914",  # too many local variables (data processing functions)
+    "R0902",  # too many instance attributes (GaiaProduct has many fields)
     "E1101",  # no-member (astropy units are dynamic)
     "W0123",  # eval-used (safe eval with AST validation for where filter)
 ]

@@ -240,17 +240,19 @@ def get_pix_range(ra, dec, product: str | GaiaProduct | None = None):
 def _cache_filename(product: GaiaProduct, pixel_range: str) -> str:
     cfg_hash = product.config_hash()
     stem = product.file_prefix.rstrip("_").rstrip(".csv").rstrip(".gz")
-    return os.path.join(get_cache_dir(), f"{stem}_{pixel_range}_{cfg_hash}.npy")
+    ext = ".npz" if product.spectro else ".npy"
+    return os.path.join(get_cache_dir(), f"{stem}_{pixel_range}_{cfg_hash}{ext}")
 
 
 def retrieve_gaia_data(
     pixel_range: str,
     product: str | GaiaProduct | None = None,
-) -> np.recarray:
+) -> np.recarray | tuple[np.recarray, np.ndarray]:
     """Load Gaia data for a given pixel range, downloading and caching if needed.
 
     Downloads the CSV.gz file, converts to compressed numpy format, and caches
-    the result for fast subsequent access.
+    the result for fast subsequent access. For spectroscopy products, returns
+    a tuple of (metadata recarray, flux 2D array).
 
     Parameters
     ----------
@@ -261,8 +263,8 @@ def retrieve_gaia_data(
 
     Returns
     -------
-    np.recarray
-        Structured array with selected columns.
+    np.recarray or tuple[np.recarray, np.ndarray]
+        Structured array with selected columns, or (meta, flux) for spectro.
     """
     prod = _resolve_product(product)
     fname = _cache_filename(prod, pixel_range)
@@ -270,14 +272,21 @@ def retrieve_gaia_data(
 
     with _CacheLock(lock_path):
         if os.path.exists(fname):
-            return np.load(fname, allow_pickle=True)
+            return _load_cached(fname, prod.spectro)
 
         rawname = f"{prod.file_prefix}{pixel_range}{prod.file_ext}"
         sampled = cached_download(f"{prod.url}{rawname}")
-        sources = read_gaia(sampled, prod.columns, prod.where)
-        np.save(fname, sources)
+        if prod.spectro:
+            meta, flux = read_gaia_spectra(
+                sampled, prod.spectro_meta_cols, prod.spectro_flux_cols, prod.where
+            )
+            np.savez(fname, meta=meta, flux=flux)
+        else:
+            sources = read_gaia(sampled, prod.columns, prod.where)
+            np.save(fname, sources)
+            meta, flux = sources, None  # type: ignore
         os.remove(sampled)
-        return sources
+        return (meta, flux) if prod.spectro else meta
 
 
 def read_gaia(
@@ -331,6 +340,108 @@ def read_gaia(
         mask = _safe_eval_where(where, result)
         result = result[mask]
     return result
+
+
+def _load_cached(
+    fname: str, spectro: bool
+) -> np.recarray | tuple[np.recarray, np.ndarray]:
+    """Load cached data from disk.
+
+    Parameters
+    ----------
+    fname : str
+        Path to the cached file (.npy or .npz).
+    spectro : bool
+        If True, load as .npz with meta and flux arrays.
+
+    Returns
+    -------
+    np.recarray or tuple[np.recarray, np.ndarray]
+        Loaded data, or (meta, flux) for spectro products.
+    """
+    if spectro:
+        data = np.load(fname, allow_pickle=True)
+        return data["meta"], data["flux"]
+    return np.load(fname, allow_pickle=True)
+
+
+def read_gaia_spectra(
+    fname: str,
+    meta_cols: list[str] | None = None,
+    flux_range: tuple[int, int] | None = None,
+    where: str | None = None,
+) -> tuple[np.recarray, np.ndarray]:
+    """Parse a gzipped Gaia spectroscopy CSV file.
+
+    Extracts metadata columns and a 2D flux array from the sampled mean
+    spectrum format.
+
+    Parameters
+    ----------
+    fname : str
+        Path to the gzipped CSV file.
+    meta_cols : list[str], optional
+        Metadata columns to extract (default: ["source_id", "ra", "dec"]).
+    flux_range : tuple[int, int], optional
+        Column index range [start, stop) for flux values
+        (default: (4, 347) for 343 flux points).
+    where : str | None, optional
+        Filter expression evaluated on metadata. Only matching rows
+        are returned.
+
+    Returns
+    -------
+    tuple[np.recarray, np.ndarray]
+        (metadata recarray, flux 2D array of shape (n_sources, n_flux_points))
+    """
+    if meta_cols is None:
+        meta_cols = ["source_id", "ra", "dec"]
+    if flux_range is None:
+        flux_range = (4, 347)
+
+    fid = gzip.GzipFile(fname)
+    lines = tqdm(fid.readlines())
+    meta_records: list[tuple] = []
+    flux_records: list[list[float]] = []
+    meta_index: list[int] = []
+    keys: list[str] = []
+
+    for line in lines:
+        if line[0] == 35:
+            continue
+        if line[0] == 115:
+            keys = [k.strip().decode() for k in line.split(b",")]
+            meta_index = [keys.index(k) for k in meta_cols if k in keys]
+            assert len(meta_index) == len(
+                meta_cols
+            ), f"Missing metadata columns: {meta_cols}"
+            continue
+
+        vals = line.replace(b"[", b"").replace(b"]", b"").replace(b'"', b"").split(b",")
+        meta_vals = []
+        for i in meta_index:
+            v = vals[i].replace(b"null", b"nan")
+            if i == 0:
+                meta_vals.append(int(float(v)))
+            else:
+                meta_vals.append(float(v))
+        meta_records.append(tuple(meta_vals))
+
+        flux_vals = []
+        for j in range(flux_range[0], flux_range[1]):
+            v = vals[j].replace(b"null", b"nan")
+            flux_vals.append(float(v))
+        flux_records.append(flux_vals)
+
+    meta = np.rec.fromrecords(meta_records, names=meta_cols)
+    flux = np.array(flux_records, dtype=np.float32)
+
+    if where is not None:
+        mask = _safe_eval_where(where, meta)
+        meta = meta[mask]
+        flux = flux[mask]
+
+    return meta, flux
 
 
 def haversine(ra1, dec1, ra2, dec2):
@@ -402,3 +513,47 @@ def query(
         in_radius = haversine(sources["ra"], sources["dec"], ra_deg, dec_deg) < rad
         all_sources.append(sources[in_radius])
     return np.hstack(all_sources)
+
+
+def query_spectra(
+    ra_deg: float,
+    dec_deg: float,
+    radius_arcmin: float = 30,
+    product: str | GaiaProduct | None = None,
+) -> tuple[np.recarray, np.ndarray]:
+    """Query Gaia spectra within a circular region around given coordinates.
+
+    Parameters
+    ----------
+    ra_deg : float
+        Right ascension center in degrees.
+    dec_deg : float
+        Declination center in degrees.
+    radius_arcmin : float, optional
+        Search radius in arcminutes (default: 30).
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "sampled_spectra").
+
+    Returns
+    -------
+    tuple[np.recarray, np.ndarray]
+        (metadata recarray, flux 2D array) for sources within the search
+        radius. Flux has shape (n_sources, n_flux_points).
+    """
+    prod = _resolve_product(product or "sampled_spectra")
+    rad = radius_arcmin / 60
+    cdec = np.cos(np.radians(dec_deg))
+    dra, ddec = np.meshgrid(
+        np.linspace(ra_deg - rad / cdec, ra_deg + rad / cdec, 5),
+        np.linspace(dec_deg - rad, dec_deg + rad, 5),
+    )
+
+    pranges = get_pix_range(dra, ddec, product=prod)
+    all_meta: list[np.recarray] = []
+    all_flux: list[np.ndarray] = []
+    for pixel in pranges:
+        meta, flux = retrieve_gaia_data(pixel, product=prod)
+        in_radius = haversine(meta["ra"], meta["dec"], ra_deg, dec_deg) < rad
+        all_meta.append(meta[in_radius])
+        all_flux.append(flux[in_radius])
+    return np.hstack(all_meta), np.vstack(all_flux)

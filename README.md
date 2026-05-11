@@ -44,6 +44,7 @@ A *product* defines which columns are loaded from the Gaia archive and which row
 |---|---|---|
 | `source` | Full Gaia source catalog (selected columns) | none |
 | `bright_sources` | Sources with G < 16 | `phot_g_mean_mag < 16` |
+| `sampled_spectra` | Sampled mean spectra (343 flux points) | none |
 
 ```python
 # Use the bright_sources product to save disk space
@@ -103,6 +104,51 @@ where="np.isfinite(phot_g_mean_mag) & np.isfinite(parallax)"
 
 Filter expressions are validated by AST analysis and evaluated in a restricted namespace (column arrays + `np` only). No filesystem access or arbitrary imports are possible.
 
+## Spectroscopy
+
+The `sampled_spectra` product provides Gaia sampled mean spectra — 343 flux points per source spanning 330–1050 nm.
+
+```python
+import gaiahealpixcache
+
+# Query spectra around a sky position
+meta, flux = gaiahealpixcache.query_spectra(
+    ra_deg=76.377,
+    dec_deg=52.831,
+    radius_arcmin=30,
+)
+print(f"{len(meta)} sources with spectra")
+print(meta["source_id"][:5])
+print(flux.shape)  # (num_sources, 343)
+```
+
+`query_spectra` returns a tuple of `(meta, flux)`:
+- `meta`: structured array with `source_id`, `ra`, `dec`
+- `flux`: 2D float array with shape `(num_sources, 343)`
+
+Spectro tiles are cached separately as `.npz` files. The same `where` filter and product system applies:
+
+```python
+# Custom spectro product with narrower flux range
+from gaiahealpixcache import GaiaProduct, register_product, query_spectra
+
+spec_product = GaiaProduct(
+    name="spectra_uv_only",
+    url="https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_spectro/",
+    md5sum_file="_MD5SUM.txt",
+    file_prefix="GaiaSpectro_",
+    file_ext="_sampledSpectrum.csv",
+    columns=["source_id", "ref_epoch", "ra", "dec"],
+    spectro=True,
+    spectro_meta_cols=["source_id", "ra", "dec"],
+    spectro_flux_cols=(4, 100),  # first 96 flux points only
+    where="phot_g_mean_mag < 15",
+)
+register_product(spec_product)
+
+meta, flux = query_spectra(76.377, 52.831, product="spectra_uv_only")
+```
+
 ## Coordinate Transforms
 
 ### Topocentric Conversion
@@ -161,6 +207,7 @@ download is interrupted, the partial file is discarded, preventing corrupted cac
 | Function | Description |
 |---|---|
 | `query(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia sources within a circular region |
+| `query_spectra(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia spectra within a circular region |
 | `gaia_to_topocentric(catalog, mjd, ...)` | Convert ICRS catalog to topocentric coordinates |
 | `center_at_date(ra, dec, mjd)` | Get apparent RA/Dec at a given date |
 | `conform_coordinates(ra, dec)` | Normalize coordinates to standard convention |

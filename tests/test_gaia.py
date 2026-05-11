@@ -12,7 +12,9 @@ from gaiahealpixcache.gaia import (
     haversine,
     parse_md5sum,
     query,
+    query_spectra,
     read_gaia,
+    read_gaia_spectra,
     retrieve_gaia_data,
 )
 
@@ -373,3 +375,196 @@ def test_cache_lock_concurrent_access(tmp_path):
         t.join()
 
     assert max_active[0] == 1
+
+
+def test_read_gaia_spectra():
+    meta_cols = ["source_id", "ra", "dec"]
+    header = b",".join(
+        [b"source_id", b"ref_epoch", b"ra", b"dec"]
+        + [b"flux_" + str(i).encode() for i in range(343)]
+    )
+    header += b"\n"
+    flux_vals = b",".join(b"1.0" for _ in range(343))
+    data_line = (
+        b",".join([b"12345", b"2016.0", b"76.377", b"52.831", flux_vals]) + b"\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(data_line)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        meta, flux = read_gaia_spectra(tmpfile)
+        assert len(meta) == 1
+        assert meta["source_id"][0] == 12345
+        assert meta["ra"][0] == pytest.approx(76.377)
+        assert flux.shape == (1, 343)
+        assert flux.dtype == np.float32
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia_spectra_multiple_sources():
+    meta_cols = ["source_id", "ra", "dec"]
+    header = b",".join(
+        [b"source_id", b"ref_epoch", b"ra", b"dec"]
+        + [b"flux_" + str(i).encode() for i in range(343)]
+    )
+    header += b"\n"
+    flux_vals = b",".join(b"1.0" for _ in range(343))
+    line1 = b",".join([b"100", b"2016.0", b"76.0", b"52.0", flux_vals]) + b"\n"
+    flux_vals2 = b",".join(b"2.0" for _ in range(343))
+    line2 = b",".join([b"200", b"2016.0", b"77.0", b"53.0", flux_vals2]) + b"\n"
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(line1)
+        gz.write(line2)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        meta, flux = read_gaia_spectra(tmpfile)
+        assert len(meta) == 2
+        assert meta["source_id"][0] == 100
+        assert meta["source_id"][1] == 200
+        assert flux.shape == (2, 343)
+        np.testing.assert_allclose(flux[0], 1.0, atol=1e-6)
+        np.testing.assert_allclose(flux[1], 2.0, atol=1e-6)
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia_spectra_where_filter():
+    meta_cols = ["source_id", "ra", "dec"]
+    header = b",".join(
+        [b"source_id", b"ref_epoch", b"ra", b"dec"]
+        + [b"flux_" + str(i).encode() for i in range(343)]
+    )
+    header += b"\n"
+    flux_vals = b",".join(b"1.0" for _ in range(343))
+    line1 = b",".join([b"100", b"2016.0", b"76.0", b"52.0", flux_vals]) + b"\n"
+    line2 = b",".join([b"200", b"2016.0", b"77.0", b"53.0", flux_vals]) + b"\n"
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(line1)
+        gz.write(line2)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        meta, flux = read_gaia_spectra(tmpfile, where="ra < 76.5")
+        assert len(meta) == 1
+        assert meta["ra"][0] == pytest.approx(76.0)
+        assert flux.shape == (1, 343)
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_read_gaia_spectra_custom_flux_range():
+    header = b"source_id,ref_epoch,ra,dec,f0,f1,f2,f3,f4,f5\n"
+    data_line = b"12345,2016.0,76.377,52.831,1.0,2.0,3.0,4.0,5.0,6.0\n"
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(data_line)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        meta, flux = read_gaia_spectra(tmpfile, flux_range=(4, 9))
+        assert len(meta) == 1
+        assert flux.shape == (1, 5)
+        np.testing.assert_allclose(flux[0], [1.0, 2.0, 3.0, 4.0, 5.0])
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_query_spectra(mocker):
+    mock_meta = np.rec.fromarrays(
+        [np.array([76.377, 76.5]), np.array([52.831, 53.0])],
+        names=["ra", "dec"],
+    )
+    mock_flux = np.array([[1.0] * 343, [2.0] * 343], dtype=np.float32)
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(mock_meta, mock_flux),
+    )
+    meta, flux = query_spectra(76.377, 52.831, radius_arcmin=30)
+    mock_retrieve.assert_called()
+    assert len(meta) >= 0
+    assert flux.shape[1] == 343
+
+
+def test_query_spectra_with_product(mocker):
+    mock_meta = np.rec.fromarrays(
+        [np.array([76.377]), np.array([52.831])],
+        names=["ra", "dec"],
+    )
+    mock_flux = np.array([[1.0] * 343], dtype=np.float32)
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(mock_meta, mock_flux),
+    )
+    meta, flux = query_spectra(
+        76.377, 52.831, radius_arcmin=30, product="sampled_spectra"
+    )
+    mock_retrieve.assert_called()
+    assert len(meta) >= 0
+
+
+def test_retrieve_gaia_data_spectro_cached(mocker):
+    mock_np_load = mocker.patch(
+        "numpy.load",
+        return_value={
+            "meta": np.rec.fromarrays(
+                [np.array([1.0, 2.0])],
+                names=["source_id"],
+            ),
+            "flux": np.array([[1.0] * 343, [2.0] * 343], dtype=np.float32),
+        },
+    )
+    mocker.patch("os.path.exists", return_value=True)
+    meta, flux = retrieve_gaia_data("0-63", product="sampled_spectra")
+    mock_np_load.assert_called_once()
+    assert len(meta) == 2
+    assert flux.shape == (2, 343)
+
+
+def test_retrieve_gaia_data_spectro_download(mocker):
+    mock_cached = mocker.patch(
+        "gaiahealpixcache.gaia.cached_download",
+        return_value="/tmp/test_spectro.csv.gz",
+    )
+    mock_read = mocker.patch(
+        "gaiahealpixcache.gaia.read_gaia_spectra",
+        return_value=(
+            np.rec.fromarrays([np.array([1.0])], names=["source_id"]),
+            np.array([[1.0] * 343], dtype=np.float32),
+        ),
+    )
+    mock_savez = mocker.patch("numpy.savez")
+    mock_remove = mocker.patch("os.remove")
+    mock_exists = mocker.patch("os.path.exists", return_value=False)
+
+    meta, flux = retrieve_gaia_data("0-63", product="sampled_spectra")
+    mock_cached.assert_called_once()
+    mock_read.assert_called_once()
+    mock_savez.assert_called_once()
+    mock_remove.assert_called_once()
+    assert len(meta) == 1
+    assert flux.shape == (1, 343)
+
+
+def test_spectro_product_config():
+    from gaiahealpixcache.products import get_product
+
+    prod = get_product("sampled_spectra")
+    assert prod.spectro is True
+    assert "source_id" in prod.spectro_meta_cols
+    assert "ra" in prod.spectro_meta_cols
+    assert "dec" in prod.spectro_meta_cols
+    assert prod.spectro_flux_cols == (4, 347)

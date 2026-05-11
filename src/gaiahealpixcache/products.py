@@ -30,6 +30,13 @@ class GaiaProduct:
         recarray. Only rows where the expression evaluates to True are kept
         in the cached .npy file. Column names refer to Gaia column names
         (e.g., "phot_g_mean_mag < 16").
+    spectro : bool
+        If True, treat this product as a spectroscopy product with separate
+        flux array data.
+    spectro_meta_cols : list[str]
+        Metadata columns to extract from spectroscopy CSV files.
+    spectro_flux_cols : tuple[int, int]
+        Column index range [start, stop) for flux values in spectroscopy CSV.
     """
 
     name: str
@@ -39,6 +46,11 @@ class GaiaProduct:
     file_ext: str
     columns: list[str] = field(default_factory=list)
     where: str | None = field(default=None)
+    spectro: bool = field(default=False)
+    spectro_meta_cols: list[str] = field(
+        default_factory=lambda: ["source_id", "ra", "dec"]
+    )
+    spectro_flux_cols: tuple[int, int] = field(default=(4, 347))
 
     def config_hash(self):
         """Return a short hash of the product configuration.
@@ -96,6 +108,16 @@ DEFAULT_PRODUCTS: dict[str, "GaiaProduct"] = {
         file_ext=".csv.gz",
         columns=COLUMNS_OF_INTEREST,
         where="phot_g_mean_mag < 16",
+    ),
+    "sampled_spectra": GaiaProduct(
+        name="sampled_spectra",
+        url="https://cdn.gea.esac.esa.int/Gaia/gdr3/Spectroscopy/xp_sampled_mean_spectrum/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="XpSampledMeanSpectrum_",
+        file_ext=".csv.gz",
+        spectro=True,
+        spectro_meta_cols=["source_id", "ra", "dec"],
+        spectro_flux_cols=(4, 347),
     ),
 }
 
@@ -226,7 +248,7 @@ def list_products() -> list[str]:
 
 
 def _cleanup_cache(product: "GaiaProduct"):
-    """Remove cached .npy files matching the product's config hash."""
+    """Remove cached files matching the product's config hash."""
     from .cache import get_cache_dir
 
     cfg_hash = product.config_hash()
@@ -235,5 +257,5 @@ def _cleanup_cache(product: "GaiaProduct"):
         return
 
     for fn in os.listdir(cache_dir):
-        if fn.endswith(".npy") and f"_{cfg_hash}.npy" in fn:
+        if f"_{cfg_hash}." in fn and fn.endswith((".npy", ".npz")):
             os.remove(os.path.join(cache_dir, fn))

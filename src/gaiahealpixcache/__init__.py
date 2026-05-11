@@ -8,6 +8,7 @@ from .gaia import (
     haversine,
     parse_md5sum,
     query,
+    query_spectra,
     retrieve_gaia_data,
 )
 from .products import (
@@ -34,6 +35,7 @@ __all__ = [
     "list_products",
     "parse_md5sum",
     "query",
+    "query_spectra",
     "register_product",
     "retrieve_gaia_data",
     "unregister_product",
