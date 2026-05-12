@@ -557,3 +557,74 @@ def query_spectra(
         all_meta.append(meta[in_radius])
         all_flux.append(flux[in_radius])
     return np.hstack(all_meta), np.vstack(all_flux)
+
+
+_SPECTRO_WAVELENGTHS = np.arange(336, 1022, 2, dtype=np.float64)
+
+
+def spectro_wavelengths(product: str | GaiaProduct | None = None) -> np.ndarray:
+    """Return the wavelengths corresponding to the sampled spectrum flux points.
+
+    Gaia sampled mean spectra use 343 wavelength positions from 336 to 1020 nm
+    with a step of 2 nm. If a custom product specifies a narrower flux range,
+    only the corresponding wavelengths are returned.
+
+    Parameters
+    ----------
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "sampled_spectra").
+
+    Returns
+    -------
+    np.ndarray
+        Array of wavelength values in nanometers.
+    """
+    prod = _resolve_product(product or "sampled_spectra")
+    start, stop = prod.spectro_flux_cols
+    return _SPECTRO_WAVELENGTHS[start - 4 : stop - 4].copy()
+
+
+def match_catalogs(
+    cat_a: np.recarray,
+    cat_b: np.recarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Match two catalogs by source_id using an inner join.
+
+    Returns index arrays so that ``cat_a[idx_a]`` and ``cat_b[idx_b]``
+    contain the same sources. Uses a hash-based algorithm with O(n+m)
+    time complexity.
+
+    Parameters
+    ----------
+    cat_a : np.recarray
+        First catalog (must have a ``source_id`` column).
+    cat_b : np.recarray
+        Second catalog (must have a ``source_id`` column).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(idx_a, idx_b)`` index arrays where each pair ``(idx_a[k], idx_b[k])``
+        corresponds to the same source_id.
+    """
+    ids_a = cat_a["source_id"]
+    ids_b = cat_b["source_id"]
+
+    if len(ids_a) <= len(ids_b):
+        id_map: dict[int, int] = {int(sid): i for i, sid in enumerate(ids_a)}
+        match_b: list[int] = []
+        match_a: list[int] = []
+        for j, sid in enumerate(ids_b):
+            if int(sid) in id_map:
+                match_a.append(id_map[int(sid)])
+                match_b.append(j)
+    else:
+        id_map = {int(sid): i for i, sid in enumerate(ids_b)}
+        match_a = []
+        match_b = []
+        for i, sid in enumerate(ids_a):
+            if int(sid) in id_map:
+                match_a.append(i)
+                match_b.append(id_map[int(sid)])
+
+    return np.array(match_a), np.array(match_b)

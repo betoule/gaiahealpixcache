@@ -10,12 +10,14 @@ from gaiahealpixcache.gaia import (
     get_pix_range,
     get_pixlist,
     haversine,
+    match_catalogs,
     parse_md5sum,
     query,
     query_spectra,
     read_gaia,
     read_gaia_spectra,
     retrieve_gaia_data,
+    spectro_wavelengths,
 )
 
 
@@ -568,3 +570,164 @@ def test_spectro_product_config():
     assert "ra" in prod.spectro_meta_cols
     assert "dec" in prod.spectro_meta_cols
     assert prod.spectro_flux_cols == (4, 347)
+
+
+def test_spectro_wavelengths_default():
+    wavelengths = spectro_wavelengths()
+    assert len(wavelengths) == 343
+    assert wavelengths[0] == pytest.approx(336.0)
+    assert wavelengths[-1] == pytest.approx(1020.0)
+    assert wavelengths.dtype == np.float64
+    for i in range(len(wavelengths) - 1):
+        assert wavelengths[i + 1] - wavelengths[i] == pytest.approx(2.0)
+
+
+def test_spectro_wavelengths_with_product_string():
+    wavelengths = spectro_wavelengths("sampled_spectra")
+    assert len(wavelengths) == 343
+
+
+def test_spectro_wavelengths_custom_flux_range():
+    from gaiahealpixcache.products import GaiaProduct
+
+    prod = GaiaProduct(
+        name="custom_spectro",
+        url="https://example.com/",
+        md5sum_file="MD5SUM",
+        file_prefix="Custom_",
+        file_ext=".csv.gz",
+        columns=["source_id"],
+        spectro=True,
+        spectro_meta_cols=["source_id", "ra", "dec"],
+        spectro_flux_cols=(4, 9),
+    )
+    wavelengths = spectro_wavelengths(prod)
+    assert len(wavelengths) == 5
+    np.testing.assert_array_equal(wavelengths, [336.0, 338.0, 340.0, 342.0, 344.0])
+
+
+def test_spectro_wavelengths_returns_copy():
+    w1 = spectro_wavelengths()
+    w2 = spectro_wavelengths()
+    w1[0] = 999.0
+    assert w2[0] == pytest.approx(336.0)
+
+
+def test_match_catalogs_full_overlap():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200, 300])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([100, 200, 300])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 3
+    assert len(idx_b) == 3
+    for k in range(3):
+        assert cat_a["source_id"][idx_a[k]] == cat_b["source_id"][idx_b[k]]
+
+
+def test_match_catalogs_partial_overlap():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200, 300, 400])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([200, 300, 500])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 2
+    assert len(idx_b) == 2
+    for k in range(2):
+        assert cat_a["source_id"][idx_a[k]] == cat_b["source_id"][idx_b[k]]
+
+
+def test_match_catalogs_no_overlap():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([300, 400])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 0
+    assert len(idx_b) == 0
+
+
+def test_match_catalogs_empty_catalog_a():
+    cat_a = np.rec.fromarrays(
+        [np.array([], dtype=np.int64)],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([100, 200])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 0
+    assert len(idx_b) == 0
+
+
+def test_match_catalogs_empty_catalog_b():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([], dtype=np.int64)],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 0
+    assert len(idx_b) == 0
+
+
+def test_match_catalogs_different_order():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200, 300])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([300, 100, 200])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 3
+    assert cat_a["source_id"][idx_a[0]] == cat_b["source_id"][idx_b[0]]
+    assert cat_a["source_id"][idx_a[1]] == cat_b["source_id"][idx_b[1]]
+    assert cat_a["source_id"][idx_a[2]] == cat_b["source_id"][idx_b[2]]
+
+
+def test_match_catalogs_returns_arrays():
+    cat_a = np.rec.fromarrays(
+        [np.array([100])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([100])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert isinstance(idx_a, np.ndarray)
+    assert isinstance(idx_b, np.ndarray)
+
+
+def test_match_catalogs_larger_a_than_b():
+    cat_a = np.rec.fromarrays(
+        [np.array([100, 200, 300, 400, 500])],
+        names=["source_id"],
+    )
+    cat_b = np.rec.fromarrays(
+        [np.array([300, 400])],
+        names=["source_id"],
+    )
+    idx_a, idx_b = match_catalogs(cat_a, cat_b)
+    assert len(idx_a) == 2
+    assert len(idx_b) == 2
+    for k in range(2):
+        assert cat_a["source_id"][idx_a[k]] == cat_b["source_id"][idx_b[k]]

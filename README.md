@@ -149,6 +149,39 @@ register_product(spec_product)
 meta, flux = query_spectra(76.377, 52.831, product="spectra_uv_only")
 ```
 
+### Wavelengths
+
+Retrieve the wavelength array corresponding to the flux points:
+
+```python
+import gaiahealpixcache
+
+wavelengths = gaiahealpixcache.spectro_wavelengths()
+print(wavelengths)  # [336., 338., 340., ..., 1018., 1020.]
+```
+
+Wavelengths are 343 values from 336 to 1020 nm with a step of 2 nm. For custom products with a narrower `spectro_flux_cols` range, only the corresponding wavelengths are returned.
+
+### Catalog Matching
+
+Match two catalogs by `source_id` using an efficient inner join:
+
+```python
+import gaiahealpixcache
+
+# Query photometry and spectra separately
+sources = gaiahealpixcache.query(76.377, 52.831)
+meta, flux = gaiahealpixcache.query_spectra(76.377, 52.831)
+
+# Find common sources
+idx_a, idx_b = gaiahealpixcache.match_catalogs(sources, meta)
+print(f"{len(idx_a)} sources have both photometry and spectra")
+print(sources["source_id"][idx_a][:5])
+print(flux[idx_b].shape)
+```
+
+`match_catalogs` returns index arrays so that `cat_a[idx_a][k]` and `cat_b[idx_b][k]` correspond to the same source. Uses a hash-based algorithm with O(n+m) time complexity.
+
 ## Coordinate Transforms
 
 ### Topocentric Conversion
@@ -215,6 +248,8 @@ download is interrupted, the partial file is discarded, preventing corrupted cac
 | `get_pix_range(ra, dec, product)` | Get Gaia file pixel ranges for coordinates |
 | `retrieve_gaia_data(pixel_range, product)` | Download/cache a single Gaia tile |
 | `haversine(ra1, dec1, ra2, dec2)` | Great-circle distance in degrees |
+| `spectro_wavelengths(product)` | Get wavelength array for spectro flux points |
+| `match_catalogs(cat_a, cat_b)` | Inner join two catalogs by source_id |
 | `get_cache_dir()` | Get cache directory path |
 | `clear_cache()` | Remove all cached data |
 | `get_product(name)` | Look up a product by name |

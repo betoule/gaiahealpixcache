@@ -6,10 +6,12 @@ from .gaia import (
     get_pix_range,
     get_pixlist,
     haversine,
+    match_catalogs,
     parse_md5sum,
     query,
     query_spectra,
     retrieve_gaia_data,
+    spectro_wavelengths,
 )
 from .products import (
     COLUMNS_OF_INTEREST,
@@ -33,10 +35,12 @@ __all__ = [
     "gaia_to_topocentric",
     "haversine",
     "list_products",
+    "match_catalogs",
     "parse_md5sum",
     "query",
     "query_spectra",
     "register_product",
     "retrieve_gaia_data",
+    "spectro_wavelengths",
     "unregister_product",
 ]
