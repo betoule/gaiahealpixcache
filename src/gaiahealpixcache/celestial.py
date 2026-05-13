@@ -14,6 +14,24 @@ from astropy.time import Time
 from .cache import join
 
 
+def airmass_pickering(h):
+    """Compute the airmass from the apparent altitude according to Pickering (2002)
+
+    According to wikipedia, Pickering (2002) formula is the better fit to obs.
+
+    Parameters
+    ----------
+    h (float, or array): the apparent altitude in radian.
+
+    Returns
+    -------
+       Airmass
+    """
+    hdeg = h * 180.0 / np.pi
+
+    return 1 / np.sin((hdeg + 244 / (165 + 47 * hdeg**1.1)) * np.pi / 180.0)
+
+
 def conform_coordinates(ra, dec):
     """Transform celestial coordinates to the normal convention (0<ra<360, -90<dec<90)
 
@@ -127,8 +145,7 @@ def gaia_to_topocentric(
     ha = (lst - coord_date.ra).wrap_at(180 * u.deg)
 
     zd = 90 * u.deg - altaz.alt
-    zd_clipped = np.clip(zd.value, 0, 87)
-    airmass = 1.0 / np.cos(np.radians(zd_clipped))
+    airmass = airmass_pickering(np.radians(altaz.alt.value))
 
     apparent = coord_date.transform_to(GCRS(obstime=obstime))
 
