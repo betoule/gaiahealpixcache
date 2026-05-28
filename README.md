@@ -128,7 +128,7 @@ Filter expressions are validated by AST analysis and evaluated in a restricted n
 
 ## Spectroscopy
 
-The `sampled_spectra` product provides Gaia sampled mean spectra — 343 flux points per source spanning 330–1050 nm.
+The `sampled_spectra` product provides Gaia sampled mean spectra — 343 flux points per source spanning 336–1020 nm.
 
 ```python
 import gaiahealpixcache
@@ -146,7 +146,7 @@ print(flux.shape)  # (num_sources, 343)
 
 `query_spectra` returns a tuple of `(meta, flux)`:
 - `meta`: structured array with `source_id`, `ra`, `dec`
-- `flux`: 2D float array with shape `(num_sources, 343)`
+- `flux`: 2D float array with shape `(num_sources, 343)`, in W/m²/nm
 
 Spectro tiles are cached separately as `.npz` files. The same `where` filter and product system applies:
 
