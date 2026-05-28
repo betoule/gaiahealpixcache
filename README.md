@@ -34,6 +34,28 @@ print(sources["phot_g_mean_mag"][:5])
 
 Tiles are downloaded on first access and cached as compressed NumPy arrays for fast subsequent queries.
 
+### Rectangular Region Query
+
+For rectangular sky regions, use `query_rectangular` with `ra_min`, `ra_max`, `dec_min`, `dec_max`:
+
+```python
+sources = gaiahealpixcache.query_rectangular(
+    ra_min=76.0, ra_max=78.0,
+    dec_min=52.0, dec_max=54.0,
+)
+```
+
+RA wrapping across the 0/360 boundary is handled automatically (e.g., `ra_min=358, ra_max=2`).
+
+The spectroscopy equivalent is `query_spectra_rectangular`:
+
+```python
+meta, flux = gaiahealpixcache.query_spectra_rectangular(
+    ra_min=76.0, ra_max=78.0,
+    dec_min=52.0, dec_max=54.0,
+)
+```
+
 ## Products
 
 A *product* defines which columns are loaded from the Gaia archive and which rows are kept. Multiple products can coexist, each with its own cache namespace.
@@ -228,6 +250,16 @@ gaiahealpixcache.clear_cache()
 
 Cached tiles are stored as `.npy` files named with the product's configuration hash, so different products and filters maintain separate cache entries.
 
+### Custom Cache Directory
+
+By default, the cache follows the XDG Base Directory specification (`~/.cache/gaiahealpixcache` on Linux). Override it with the `GAIAXCACHE` environment variable:
+
+```bash
+export GAIAXCACHE=/path/to/my/cache
+```
+
+This is useful when the default cache location has limited disk space or when you want to share the cache across projects.
+
 ## Concurrency
 
 Each cached tile is protected by a file-based lock (`fcntl.flock` on Unix). When two
@@ -240,7 +272,9 @@ download is interrupted, the partial file is discarded, preventing corrupted cac
 | Function | Description |
 |---|---|
 | `query(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia sources within a circular region |
+| `query_rectangular(ra_min, ra_max, dec_min, dec_max, product)` | Query Gaia sources within a rectangular region |
 | `query_spectra(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia spectra within a circular region |
+| `query_spectra_rectangular(ra_min, ra_max, dec_min, dec_max, product)` | Query Gaia spectra within a rectangular region |
 | `gaia_to_topocentric(catalog, mjd, ...)` | Convert ICRS catalog to topocentric coordinates |
 | `center_at_date(ra, dec, mjd)` | Get apparent RA/Dec at a given date |
 | `conform_coordinates(ra, dec)` | Normalize coordinates to standard convention |

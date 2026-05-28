@@ -13,7 +13,9 @@ from gaiahealpixcache.gaia import (
     match_catalogs,
     parse_md5sum,
     query,
+    query_rectangular,
     query_spectra,
+    query_spectra_rectangular,
     read_gaia,
     read_gaia_spectra,
     retrieve_gaia_data,
@@ -734,3 +736,114 @@ def test_match_catalogs_larger_a_than_b():
     assert len(idx_b) == 2
     for k in range(2):
         assert cat_a["source_id"][idx_a[k]] == cat_b["source_id"][idx_b[k]]
+
+
+def test_query_rectangular(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.0, 77.0, 78.0]), np.array([52.0, 53.0, 54.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query_rectangular(76.0, 77.5, 52.5, 53.5)
+    assert len(result) == 1
+    assert result["ra"][0] == 77.0
+    assert result["dec"][0] == 53.0
+    mock_retrieve.assert_called()
+
+
+def test_query_rectangular_empty(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.0, 77.0]), np.array([52.0, 53.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query_rectangular(80.0, 81.0, 55.0, 56.0)
+    assert len(result) == 0
+
+
+def test_query_rectangular_ra_wrap(mocker):
+    mocker.patch(
+        "gaiahealpixcache.gaia.get_pix_range",
+        return_value=["0-63"],
+    )
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([359.0, 0.5, 10.0]), np.array([10.0, 11.0, 12.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query_rectangular(358.0, 2.0, 9.0, 12.0)
+    assert len(result) == 2
+    assert 359.0 in result["ra"]
+    assert 0.5 in result["ra"]
+
+
+def test_query_rectangular_with_product(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=np.rec.fromarrays(
+            [np.array([76.0, 77.0]), np.array([52.0, 53.0])],
+            names=["ra", "dec"],
+        ),
+    )
+    result = query_rectangular(76.0, 77.5, 52.5, 53.5, product="source")
+    assert len(result) >= 0
+    mock_retrieve.assert_called()
+
+
+def test_query_spectra_rectangular(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(
+            np.rec.fromarrays(
+                [np.array([76.0, 77.0, 78.0]), np.array([52.0, 53.0, 54.0])],
+                names=["ra", "dec"],
+            ),
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
+        ),
+    )
+    meta, flux = query_spectra_rectangular(76.0, 77.5, 52.5, 53.5)
+    assert len(meta) == 1
+    assert flux.shape == (1, 2)
+    mock_retrieve.assert_called()
+
+
+def test_query_spectra_rectangular_empty(mocker):
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(
+            np.rec.fromarrays(
+                [np.array([76.0]), np.array([52.0])],
+                names=["ra", "dec"],
+            ),
+            np.array([[1.0, 2.0]], dtype=np.float32),
+        ),
+    )
+    meta, flux = query_spectra_rectangular(80.0, 81.0, 55.0, 56.0)
+    assert len(meta) == 0
+    assert flux.shape == (0, 2)
+
+
+def test_query_spectra_rectangular_ra_wrap(mocker):
+    mocker.patch(
+        "gaiahealpixcache.gaia.get_pix_range",
+        return_value=["0-63"],
+    )
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(
+            np.rec.fromarrays(
+                [np.array([359.0, 0.5, 10.0]), np.array([10.0, 11.0, 12.0])],
+                names=["ra", "dec"],
+            ),
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
+        ),
+    )
+    meta, flux = query_spectra_rectangular(358.0, 2.0, 9.0, 12.0)
+    assert len(meta) == 2
+    assert flux.shape == (2, 2)

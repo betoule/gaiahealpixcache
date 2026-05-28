@@ -565,6 +565,113 @@ def query_spectra(
     return np.hstack(all_meta), np.vstack(all_flux)
 
 
+def _in_rectangle(ra, dec, ra_min, ra_max, dec_min, dec_max):
+    """Boolean mask for sources inside a rectangular region.
+
+    Handles RA wrapping across the 0/360 boundary.
+    """
+    if ra_max < ra_min:
+        ra_mask = (ra >= ra_min) | (ra <= ra_max)
+    else:
+        ra_mask = (ra >= ra_min) & (ra <= ra_max)
+    return ra_mask & (dec >= dec_min) & (dec <= dec_max)
+
+
+def _cover_grid(ra_min, ra_max, dec_min, dec_max):
+    """Return meshgrid coords that cover the rectangular region for tile discovery."""
+    if ra_max < ra_min:
+        ra_max += 360
+    dra, ddec = np.meshgrid(
+        np.linspace(ra_min, ra_max, 5),
+        np.linspace(dec_min, dec_max, 5),
+    )
+    dra = dra % 360
+    return dra, ddec
+
+
+def query_rectangular(
+    ra_min: float,
+    ra_max: float,
+    dec_min: float,
+    dec_max: float,
+    product: str | GaiaProduct | None = None,
+) -> np.recarray:
+    """Query Gaia sources within a rectangular region.
+
+    Parameters
+    ----------
+    ra_min : float
+        Minimum right ascension in degrees.
+    ra_max : float
+        Maximum right ascension in degrees.
+    dec_min : float
+        Minimum declination in degrees.
+    dec_max : float
+        Maximum declination in degrees.
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "source").
+
+    Returns
+    -------
+    np.recarray
+        Structured array of Gaia sources within the rectangular region.
+    """
+    prod = _resolve_product(product)
+    dra, ddec = _cover_grid(ra_min, ra_max, dec_min, dec_max)
+
+    pranges = get_pix_range(dra, ddec, product=prod)
+    all_sources = []
+    for pixel in set(pranges):
+        sources = retrieve_gaia_data(pixel, product=prod)
+        mask = _in_rectangle(
+            sources["ra"], sources["dec"], ra_min, ra_max, dec_min, dec_max
+        )
+        all_sources.append(sources[mask])
+    return np.hstack(all_sources)
+
+
+def query_spectra_rectangular(
+    ra_min: float,
+    ra_max: float,
+    dec_min: float,
+    dec_max: float,
+    product: str | GaiaProduct | None = None,
+) -> tuple[np.recarray, np.ndarray]:
+    """Query Gaia spectra within a rectangular region.
+
+    Parameters
+    ----------
+    ra_min : float
+        Minimum right ascension in degrees.
+    ra_max : float
+        Maximum right ascension in degrees.
+    dec_min : float
+        Minimum declination in degrees.
+    dec_max : float
+        Maximum declination in degrees.
+    product : str or GaiaProduct, optional
+        Product name or instance (default: "sampled_spectra").
+
+    Returns
+    -------
+    tuple[np.recarray, np.ndarray]
+        (metadata recarray, flux 2D array) for sources within the rectangular
+        region. Flux has shape (n_sources, n_flux_points).
+    """
+    prod = _resolve_product(product or "sampled_spectra")
+    dra, ddec = _cover_grid(ra_min, ra_max, dec_min, dec_max)
+
+    pranges = get_pix_range(dra, ddec, product=prod)
+    all_meta: list[np.recarray] = []
+    all_flux: list[np.ndarray] = []
+    for pixel in set(pranges):
+        meta, flux = retrieve_gaia_data(pixel, product=prod)
+        mask = _in_rectangle(meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max)
+        all_meta.append(meta[mask])
+        all_flux.append(flux[mask])
+    return np.hstack(all_meta), np.vstack(all_flux)
+
+
 _SPECTRO_WAVELENGTHS = np.arange(336, 1022, 2, dtype=np.float64)
 
 
