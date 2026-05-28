@@ -21,6 +21,10 @@ def get_cache_dir(path=False):
     str or Path
         Path to the gaiahealpixcache cache directory.
     """
+    override = os.getenv("GAIAXCACHE")
+    if override:
+        return Path(override) if path else override
+
     if os.name == "nt":
         cache_dir = Path(os.getenv("LOCALAPPDATA")) / "Cache" / "gaiahealpixcache"
     elif os.name == "posix":
