@@ -104,7 +104,10 @@ def test_read_gaia():
     comment = b"# %ECSV 1.0\n"
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
     data_values = b",".join(b"1.0" for _ in COLUMNS_OF_INTEREST) + b"\n"
-    null_values = b",".join(b"null" for _ in COLUMNS_OF_INTEREST) + b"\n"
+    null_values = (
+        b",".join(b"0" if c == "source_id" else b"null" for c in COLUMNS_OF_INTEREST)
+        + b"\n"
+    )
     data_lines = [data_values, null_values]
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
         gz = gzip.GzipFile(fileobj=f, mode="wb")
@@ -118,7 +121,7 @@ def test_read_gaia():
     try:
         result = read_gaia(tmpfile)
         assert len(result) == 2
-        assert result["source_id"][0] == 1.0
+        assert result["source_id"][0] == 1
         assert result["ra"][0] == 1.0
         assert np.isnan(result["parallax"][1])
     finally:

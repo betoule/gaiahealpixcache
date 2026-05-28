@@ -319,10 +319,15 @@ def read_gaia(
     flux = []
     keep_index = None
     keys = None
+    source_id_pos = None
 
     def process(line):
         vals = line.replace(b"[", b"").replace(b"]", b"").replace(b'"', b"").split(b",")
-        return [float(vals[i].replace(b"null", b"nan")) for i in keep_index]
+        result = []
+        for pos, i in enumerate(keep_index):
+            v = vals[i].replace(b"null", b"nan")
+            result.append(int(float(v)) if pos == source_id_pos else float(v))
+        return result
 
     for line in lines:
         if line[0] == 35:
@@ -331,6 +336,7 @@ def read_gaia(
             keys = [k.strip().decode() for k in line.split(b",")]
             keep_index = [keys.index(k) for k in keys if k in columns]
             keys = [keys[i] for i in keep_index]
+            source_id_pos = keys.index("source_id") if "source_id" in keys else None
             assert len(keys) == len(columns), "missing column"
             continue
         flux.append(process(line))
