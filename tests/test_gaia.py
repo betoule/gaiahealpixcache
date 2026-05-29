@@ -105,7 +105,10 @@ def test_read_gaia():
 
     comment = b"# %ECSV 1.0\n"
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
-    data_values = b",".join(b"10" if c == "source_id" else b"1.0" for c in COLUMNS_OF_INTEREST) + b"\n"
+    data_values = (
+        b",".join(b"10" if c == "source_id" else b"1.0" for c in COLUMNS_OF_INTEREST)
+        + b"\n"
+    )
     null_values = (
         b",".join(b"0" if c == "source_id" else b"null" for c in COLUMNS_OF_INTEREST)
         + b"\n"
@@ -132,24 +135,21 @@ def test_read_gaia():
 
 def test_read_gaia_where_filter():
     from gaiahealpixcache.products import COLUMNS_OF_INTEREST
+
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+
     def get_v(i, v):
         if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag"):
             return v
         if i == COLUMNS_OF_INTEREST.index("source_id"):
-            return b'1111'
+            return b"1111"
         return b"1.0"
+
     bright = (
-        b",".join(
-            get_v(i, b"10.0") for i, c in enumerate(COLUMNS_OF_INTEREST)
-        )
-        + b"\n"
+        b",".join(get_v(i, b"10.0") for i, c in enumerate(COLUMNS_OF_INTEREST)) + b"\n"
     )
     faint = (
-        b",".join(
-            get_v(i, b"18.0") for i, c in enumerate(COLUMNS_OF_INTEREST)
-        )
-        + b"\n"
+        b",".join(get_v(i, b"18.0") for i, c in enumerate(COLUMNS_OF_INTEREST)) + b"\n"
     )
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
         gz = gzip.GzipFile(fileobj=f, mode="wb")
@@ -171,25 +171,20 @@ def test_read_gaia_where_complex():
     from gaiahealpixcache.products import COLUMNS_OF_INTEREST
 
     header = b",".join(c.encode() for c in COLUMNS_OF_INTEREST) + b"\n"
+
     def get_v(i, v1, v2):
         if i == COLUMNS_OF_INTEREST.index("phot_g_mean_mag"):
             return v1
         if i == COLUMNS_OF_INTEREST.index("source_id"):
-            return b'1111'
+            return b"1111"
         return v2
 
     row1 = (
-        b",".join(
-            get_v(i, b"10.0", b"5.0")
-            for i, c in enumerate(COLUMNS_OF_INTEREST)
-        )
+        b",".join(get_v(i, b"10.0", b"5.0") for i, c in enumerate(COLUMNS_OF_INTEREST))
         + b"\n"
     )
     row2 = (
-        b",".join(
-            get_v(i, b"18.0", b"30.0")
-            for i, c in enumerate(COLUMNS_OF_INTEREST)
-        )
+        b",".join(get_v(i, b"18.0", b"30.0") for i, c in enumerate(COLUMNS_OF_INTEREST))
         + b"\n"
     )
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
