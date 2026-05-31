@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] — 2025-05-31
+
+### Fixed
+- `source_id` precision loss for large values — converted bytes directly with `int(v)` instead of `int(float(v))` which loses precision for 19-digit Gaia source IDs
+
 ## [0.3.0] — 2025-05-28
 
 ### Added
