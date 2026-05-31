@@ -326,7 +326,7 @@ def read_gaia(
         result = []
         for pos, i in enumerate(keep_index):
             v = vals[i].replace(b"null", b"nan")
-            result.append(int(float(v)) if pos == source_id_pos else float(v))
+            result.append(int(v) if pos == source_id_pos else float(v))
         return result
 
     for line in lines:
@@ -428,7 +428,7 @@ def read_gaia_spectra(
         for i in meta_index:
             v = vals[i].replace(b"null", b"nan")
             if i == 0:
-                meta_vals.append(int(float(v)))
+                meta_vals.append(int(v))
             else:
                 meta_vals.append(float(v))
         meta_records.append(tuple(meta_vals))
