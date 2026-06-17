@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gaiahealpixcache"
-version = "0.3.1"
+version = "0.3.2"
 description = "Download and cache a lightweight version of the Gaia catalog for offline work"
 readme = "README.md"
 license = {text = "MIT"}
