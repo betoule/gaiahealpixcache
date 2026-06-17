@@ -7,6 +7,7 @@ import os
 import healpy
 import numpy as np
 from tqdm import tqdm
+from filelock import FileLock
 
 from .cache import cached_download, get_cache_dir
 from .celestial import conform_coordinates
@@ -90,54 +91,6 @@ def _safe_eval_where(expr: str, data: np.recarray) -> np.ndarray:
     for col in data.dtype.names:
         safe_ns[col] = data[col]
     return eval(expr, {"__builtins__": {}}, safe_ns)  # noqa: S307
-
-
-class _CacheLock:
-    """File-based lock using fcntl to prevent concurrent downloads.
-
-    On Windows (where fcntl is unavailable), falls back to lock files
-    with atomic creation.
-    """
-
-    def __init__(self, lock_path: str, timeout: float = 300.0):
-        self._lock_path = lock_path
-        self._timeout = timeout
-        self._fd: int | None = None
-
-    def acquire(self):
-        import fcntl
-        import time
-
-        self._fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR)
-        deadline = time.monotonic() + self._timeout
-        while time.monotonic() < deadline:
-            try:
-                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
-            except BlockingIOError:
-                time.sleep(0.1)
-        raise TimeoutError(
-            f"Could not acquire cache lock {self._lock_path} within "
-            f"{self._timeout:.0f}s"
-        )
-
-    def release(self):
-        if self._fd is not None:
-            import fcntl
-
-            fcntl.flock(self._fd, fcntl.LOCK_UN)
-            os.close(self._fd)
-            self._fd = None
-        lock_file = self._lock_path
-        if os.path.exists(lock_file):
-            os.unlink(lock_file)
-
-    def __enter__(self):
-        self.acquire()
-        return self
-
-    def __exit__(self, *args):
-        self.release()
 
 
 _md5sum_cache: dict[str, str | None] = {}
@@ -270,7 +223,7 @@ def retrieve_gaia_data(
     fname = _cache_filename(prod, pixel_range)
     lock_path = fname + ".lock"
 
-    with _CacheLock(lock_path):
+    with FileLock(lock_path):
         if os.path.exists(fname):
             return _load_cached(fname, prod.spectro)
 

@@ -33,6 +33,7 @@ dependencies = [
     "healpy",
     "requests",
     "tqdm",
+    "filelock",
 ]
 
 [project.optional-dependencies]
