@@ -33,10 +33,14 @@ class GaiaProduct:
     spectro : bool
         If True, treat this product as a spectroscopy product with separate
         flux array data.
+    continuous : bool
+        If True, this product provides XP continuous mean spectra that
+        require calibration and sampling via gaiaxpy.
     spectro_meta_cols : list[str]
         Metadata columns to extract from spectroscopy CSV files.
     spectro_flux_cols : tuple[int, int]
-        Column index range [start, stop) for flux values in spectroscopy CSV.
+        Column index range [start, stop) for flux values in spectroscopy CSV,
+        or output flux index range for continuous spectra after gaiaxpy sampling.
     """
 
     name: str
@@ -47,6 +51,7 @@ class GaiaProduct:
     columns: list[str] = field(default_factory=list)
     where: str | None = field(default=None)
     spectro: bool = field(default=False)
+    continuous: bool = field(default=False)
     spectro_meta_cols: list[str] = field(
         default_factory=lambda: ["source_id", "ra", "dec"]
     )
@@ -55,9 +60,12 @@ class GaiaProduct:
     def config_hash(self):
         """Return a short hash of the product configuration.
 
-        Used to make cache filenames unique per product+columns+filter combo.
+        Used to make cache filenames unique per product+columns+filter+flags combo.
         """
-        config_str = f"{self.name}:{','.join(sorted(self.columns))}:{self.where or ''}"
+        config_str = (
+            f"{self.name}:{','.join(sorted(self.columns))}:"
+            f"{self.where or ''}:spectro={self.spectro}:cont={self.continuous}"
+        )
         return hashlib.md5(config_str.encode()).hexdigest()[:8]
 
     def to_dict(self):
@@ -116,6 +124,18 @@ DEFAULT_PRODUCTS: dict[str, "GaiaProduct"] = {
         file_prefix="XpSampledMeanSpectrum_",
         file_ext=".csv.gz",
         spectro=True,
+        spectro_meta_cols=["source_id", "ra", "dec"],
+        spectro_flux_cols=(4, 347),
+    ),
+    "continuous_spectra": GaiaProduct(
+        name="continuous_spectra",
+        url="https://cdn.gea.esac.esa.int/Gaia/gdr3/Spectroscopy/xp_continuous_mean_spectrum/",
+        md5sum_file="_MD5SUM.txt",
+        file_prefix="XpContinuousMeanSpectrum_",
+        file_ext=".csv.gz",
+        columns=["source_id", "ra", "dec"],
+        spectro=True,
+        continuous=True,
         spectro_meta_cols=["source_id", "ra", "dec"],
         spectro_flux_cols=(4, 347),
     ),

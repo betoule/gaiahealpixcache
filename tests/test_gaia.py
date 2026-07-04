@@ -1,3 +1,4 @@
+import importlib
 import os
 import gzip
 import tempfile
@@ -12,6 +13,7 @@ from gaiahealpixcache.gaia import (
     haversine,
     match_catalogs,
     parse_md5sum,
+    process_continuous_spectra,
     query,
     query_rectangular,
     query_spectra,
@@ -567,6 +569,278 @@ def test_spectro_wavelengths_returns_copy():
     w2 = spectro_wavelengths()
     w1[0] = 999.0
     assert w2[0] == pytest.approx(336.0)
+
+
+# ---------------------------------------------------------------------------
+# Continuous spectra tests
+# ---------------------------------------------------------------------------
+
+
+def test_continuous_spectra_product_config():
+    from gaiahealpixcache.products import get_product
+
+    prod = get_product("continuous_spectra")
+    assert prod.spectro is True
+    assert prod.continuous is True
+    assert prod.spectro_meta_cols == ["source_id", "ra", "dec"]
+    assert prod.columns == ["source_id", "ra", "dec"]
+    assert prod.spectro_flux_cols == (4, 347)
+    assert prod.file_prefix == "XpContinuousMeanSpectrum_"
+
+
+def _make_mock_calibrate_result(source_ids):
+    """Build a DataFrame matching gaiaxpy.calibrate() output format.
+
+    Returns (DataFrame, sampling) where flux/flux_error columns contain
+    numpy arrays (one per source).
+    """
+    import pandas as pd
+
+    n_wl = 343
+    wl_values = np.arange(336, 1022, 2, dtype=np.float64)
+    data = {
+        "source_id": source_ids,
+        "flux": [np.ones(n_wl, dtype=np.float64) for _ in source_ids],
+        "flux_error": [np.zeros(n_wl, dtype=np.float64) for _ in source_ids],
+    }
+    return pd.DataFrame(data), wl_values
+
+
+@pytest.fixture()
+def mock_gaiaxpy(mocker, request):
+    """Install a mock gaiaxpy module with a ``calibrate`` function.
+
+    The mock ``calibrate`` returns (DataFrame, sampling) — tests should
+    set ``mock_gaiaxpy.calibrate.return_value`` to override.
+    """
+    import sys, types
+
+    old_module = sys.modules.get("gaiaxpy")
+    mock_module = types.ModuleType("gaiaxpy")
+    mock_calibrate = mocker.MagicMock()
+    mock_module.calibrate = mock_calibrate
+    sys.modules["gaiaxpy"] = mock_module
+
+    def cleanup():
+        if old_module is not None:
+            sys.modules["gaiaxpy"] = old_module
+        elif "gaiaxpy" in sys.modules:
+            del sys.modules["gaiaxpy"]
+
+    request.addfinalizer(cleanup)
+    return mock_module
+
+
+def test_process_continuous_spectra(mocker, mock_gaiaxpy):
+    """process_continuous_spectra extracts only columns gaiaxpy provides."""
+    import gzip
+    import tempfile
+
+    mock_result, mock_sampling = _make_mock_calibrate_result([12345])
+    mock_gaiaxpy.calibrate.return_value = (mock_result, mock_sampling)
+
+    header = b"source_id,solution_id,bp_coefficients,rp_coefficients\n"
+    data_line = b'12345,4545469030156206081,"[0.1,0.2]","[0.3,0.4]"\n'
+
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.write(data_line)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        # Request source_id + ra + dec but only source_id is available
+        meta, flux = process_continuous_spectra(tmpfile, ["source_id", "ra", "dec"])
+        assert len(meta) == 1
+        # Only source_id was extracted (ra/dec not in calibrate output)
+        assert list(meta.dtype.names) == ["source_id"]
+        assert meta["source_id"][0] == 12345
+        assert flux.shape == (1, 343)
+        assert flux.dtype == np.float32
+        np.testing.assert_allclose(flux[0], 1.0)
+        mock_gaiaxpy.calibrate.assert_called_once()
+    finally:
+        os.unlink(tmpfile)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("gaiaxpy") is not None,
+    reason="gaiaxpy is installed - cannot test ImportError path",
+)
+def test_process_continuous_spectra_import_error():
+    with pytest.raises(ImportError, match="gaiaxpy is required"):
+        process_continuous_spectra("/nonexistent.csv.gz")
+
+
+def test_process_continuous_spectra_empty(mocker, mock_gaiaxpy):
+    import gzip
+    import tempfile
+
+    wl_values = np.arange(336, 1022, 2, dtype=np.float64)
+
+    import pandas as pd
+
+    mock_result = pd.DataFrame(
+        {
+            "source_id": pd.array([], dtype=pd.Int64Dtype()),
+            "flux": pd.array([], dtype=object),
+            "flux_error": pd.array([], dtype=object),
+        }
+    )
+    mock_gaiaxpy.calibrate.return_value = (mock_result, wl_values)
+
+    header = b"source_id,solution_id,bp_coefficients,rp_coefficients\n"
+
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv.gz", delete=False) as f:
+        gz = gzip.GzipFile(fileobj=f, mode="wb")
+        gz.write(header)
+        gz.close()
+        tmpfile = f.name
+
+    try:
+        meta, flux = process_continuous_spectra(tmpfile)
+        assert len(meta) == 0
+        assert flux.shape == (0, 343)
+        assert flux.dtype == np.float32
+    finally:
+        os.unlink(tmpfile)
+
+
+def test_retrieve_gaia_data_continuous_cached(mocker):
+    """Cached .npz has enriched meta (source_id + ra + dec)."""
+    mock_np_load = mocker.patch(
+        "numpy.load",
+        return_value={
+            "meta": np.rec.fromarrays(
+                [np.array([12345]), np.array([76.377]), np.array([52.831])],
+                names=["source_id", "ra", "dec"],
+            ),
+            "flux": np.array([[1.0] * 343], dtype=np.float32),
+        },
+    )
+    mocker.patch("os.path.exists", return_value=True)
+    meta, flux = retrieve_gaia_data("0-63", product="continuous_spectra")
+    mock_np_load.assert_called_once()
+    assert len(meta) == 1
+    assert "ra" in meta.dtype.names
+    assert "dec" in meta.dtype.names
+    assert meta["ra"][0] == pytest.approx(76.377)
+    assert flux.shape == (1, 343)
+
+
+def _make_mock_source_data(n=1, start_sid=12345, ra0=76.377, dec0=52.831):
+    """Create a mock source-catalogue recarray with source_id, ra, dec."""
+    sids = np.arange(start_sid, start_sid + n, dtype=np.int64)
+    ras = ra0 + np.arange(n, dtype=np.float64) * 0.1
+    decs = dec0 + np.arange(n, dtype=np.float64) * 0.1
+    return np.rec.fromarrays([sids, ras, decs], names=["source_id", "ra", "dec"])
+
+
+def test_retrieve_gaia_data_continuous_enriches_meta(mocker):
+    """Download path: gaiaxpy returns source_id only, enrichment adds ra/dec."""
+    mock_cached = mocker.patch(
+        "gaiahealpixcache.gaia.cached_download",
+        return_value="/tmp/test_continuous.csv.gz",
+    )
+    # process_continuous_spectra returns source_id only
+    mock_process = mocker.patch(
+        "gaiahealpixcache.gaia.process_continuous_spectra",
+        return_value=(
+            np.rec.fromarrays([np.array([12345, 12346])], names=["source_id"]),
+            np.array([[1.0] * 343, [2.0] * 343], dtype=np.float32),
+        ),
+    )
+    # The nested retrieve_gaia_data call for the source product
+    mock_source = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=_make_mock_source_data(n=2, start_sid=12345),
+    )
+    mock_savez = mocker.patch("numpy.savez")
+    mock_remove = mocker.patch("os.remove")
+    mock_exists = mocker.patch("os.path.exists", return_value=False)
+
+    meta, flux = retrieve_gaia_data("0-63", product="continuous_spectra")
+
+    mock_cached.assert_called_once()
+    mock_process.assert_called_once()
+    # One call for continuous product, one for source enrichment
+    assert mock_source.call_count == 1
+    mock_savez.assert_called_once()
+    mock_remove.assert_called_once()
+
+    assert len(meta) == 2
+    assert list(meta.dtype.names) == ["source_id", "ra", "dec"]
+    assert meta["source_id"][0] == 12345
+    assert meta["ra"][0] == pytest.approx(76.377)
+    assert meta["dec"][0] == pytest.approx(52.831)
+    assert flux.shape == (2, 343)
+
+
+def test_retrieve_gaia_data_continuous_download_already_rich(mocker):
+    """When process_continuous_spectra already returns all cols, skip enrichment."""
+    mock_cached = mocker.patch(
+        "gaiahealpixcache.gaia.cached_download",
+        return_value="/tmp/test_continuous.csv.gz",
+    )
+    # process_continuous_spectra already returns ra+dec
+    mock_process = mocker.patch(
+        "gaiahealpixcache.gaia.process_continuous_spectra",
+        return_value=(
+            np.rec.fromarrays(
+                [np.array([12345]), np.array([76.377]), np.array([52.831])],
+                names=["source_id", "ra", "dec"],
+            ),
+            np.array([[1.0] * 343], dtype=np.float32),
+        ),
+    )
+    # The nested retrieve_gaia_data should NOT be called
+    mock_source = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+    )
+    mock_savez = mocker.patch("numpy.savez")
+    mock_remove = mocker.patch("os.remove")
+    mock_exists = mocker.patch("os.path.exists", return_value=False)
+
+    meta, flux = retrieve_gaia_data("0-63", product="continuous_spectra")
+
+    mock_cached.assert_called_once()
+    mock_process.assert_called_once()
+    mock_source.assert_not_called()  # enrichment skipped
+    mock_savez.assert_called_once()
+    mock_remove.assert_called_once()
+
+    assert len(meta) == 1
+    assert list(meta.dtype.names) == ["source_id", "ra", "dec"]
+    assert meta["ra"][0] == pytest.approx(76.377)
+
+
+def test_query_spectra_continuous_product(mocker):
+    """query_spectra works with continuous_spectra (meta now includes ra/dec)."""
+    mock_meta = np.rec.fromarrays(
+        [np.array([12345, 12346]), np.array([76.377, 76.5]), np.array([52.831, 53.0])],
+        names=["source_id", "ra", "dec"],
+    )
+    mock_flux = np.array([[1.0] * 343, [2.0] * 343], dtype=np.float32)
+    mock_retrieve = mocker.patch(
+        "gaiahealpixcache.gaia.retrieve_gaia_data",
+        return_value=(mock_meta, mock_flux),
+    )
+    meta, flux = query_spectra(
+        76.377, 52.831, radius_arcmin=30, product="continuous_spectra"
+    )
+    mock_retrieve.assert_called()
+    assert len(meta) >= 0
+    assert "ra" in meta.dtype.names
+    assert "dec" in meta.dtype.names
+    assert flux.shape[1] == 343
+
+
+def test_continuous_spectra_wavelengths():
+    wavelengths = spectro_wavelengths("continuous_spectra")
+    assert len(wavelengths) == 343
+    assert wavelengths[0] == pytest.approx(336.0)
+    assert wavelengths[-1] == pytest.approx(1020.0)
 
 
 def test_match_catalogs_full_overlap():

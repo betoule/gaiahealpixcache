@@ -197,6 +197,84 @@ def _cache_filename(product: GaiaProduct, pixel_range: str) -> str:
     return os.path.join(get_cache_dir(), f"{stem}_{pixel_range}_{cfg_hash}{ext}")
 
 
+def process_continuous_spectra(
+    csv_path: str,
+    meta_cols: list[str] | None = None,
+) -> tuple[np.recarray, np.ndarray]:
+    """Process a downloaded XP continuous mean spectrum file through gaiaxpy.
+
+    Decompresses the gzipped ECSV file, runs gaiaxpy calibration and
+    sampling to produce calibrated flux values on a regular wavelength
+    grid (336-1020 nm, step 2 nm). Returns the same (meta, flux) format
+    as the existing sampled spectra.
+
+    Notes
+    -----
+    The calibrate output only contains ``source_id``.  Metadata columns
+    requested via *meta_cols* that are not present in the gaiaxpy result
+    (e.g. ``ra``, ``dec``) are silently omitted — the caller
+    (``retrieve_gaia_data``) is responsible for enriching them from the
+    source catalogue.
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to the gzipped ECSV file (as downloaded by cached_download).
+    meta_cols : list[str], optional
+        Desired metadata columns (default: ``["source_id"]``).  Only
+        columns actually present in the gaiaxpy output are returned.
+
+    Returns
+    -------
+    tuple[np.recarray, np.ndarray]
+        (metadata recarray, flux 2D array of shape (n_sources, 343))
+    """
+    if meta_cols is None:
+        meta_cols = ["source_id"]
+
+    try:
+        from gaiaxpy import calibrate
+    except ImportError as exc:
+        raise ImportError(
+            "gaiaxpy is required for continuous spectra. "
+            "Install with: pip install gaiahealpixcache[spectro]"
+        ) from exc
+
+    import tempfile
+
+    tmpname = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".ecsv", delete=False) as tmp:
+            tmpname = tmp.name
+            with gzip.open(csv_path, "rb") as gz:
+                tmp.write(gz.read())
+
+        result, _sampling = calibrate(tmpname, save_file=False)
+
+    finally:
+        if tmpname and os.path.exists(tmpname):
+            os.unlink(tmpname)
+
+    if len(result) == 0:
+        dtypes = [np.int64 if c == "source_id" else np.float64 for c in meta_cols]
+        meta = np.rec.fromarrays(
+            [np.array([], dtype=dt) for dt in dtypes], names=meta_cols
+        )
+        return meta, np.empty((0, 343), dtype=np.float32)
+
+    # Only extract columns actually present in the calibrate output.
+    available = {c for c in meta_cols if c in result.columns}
+    if not available:
+        available = {"source_id"}
+    meta = np.rec.fromarrays(
+        [result[c].values for c in available], names=list(available)
+    )
+
+    flux = np.vstack(result["flux"].values).astype(np.float32)
+
+    return meta, flux
+
+
 def retrieve_gaia_data(
     pixel_range: str,
     product: str | GaiaProduct | None = None,
@@ -229,7 +307,34 @@ def retrieve_gaia_data(
 
         rawname = f"{prod.file_prefix}{pixel_range}{prod.file_ext}"
         sampled = cached_download(f"{prod.url}{rawname}")
-        if prod.spectro:
+        if prod.continuous:
+            meta, flux = process_continuous_spectra(sampled, prod.spectro_meta_cols)
+
+            # Enrich metadata with columns missing from gaiaxpy output
+            # (e.g. ra, dec) by matching against the source catalogue tile.
+            missing = [c for c in prod.spectro_meta_cols if c not in meta.dtype.names]
+            if missing:
+                source = retrieve_gaia_data(pixel_range)
+                idx_cont, idx_src = match_catalogs(meta, source)
+                enriched = {}
+                for col in prod.spectro_meta_cols:
+                    if col in meta.dtype.names:
+                        enriched[col] = meta[col][idx_cont]
+                    else:
+                        enriched[col] = source[col][idx_src]
+                meta = np.rec.fromarrays(
+                    [enriched[c] for c in prod.spectro_meta_cols],
+                    names=prod.spectro_meta_cols,
+                )
+                flux = flux[idx_cont]
+
+            if prod.where is not None:
+                mask = _safe_eval_where(prod.where, meta)
+                meta = meta[mask]
+                flux = flux[mask]
+
+            np.savez(fname, meta=meta, flux=flux)
+        elif prod.spectro:
             meta, flux = read_gaia_spectra(
                 sampled, prod.spectro_meta_cols, prod.spectro_flux_cols, prod.where
             )
@@ -619,7 +724,9 @@ def query_spectra_rectangular(
     all_flux: list[np.ndarray] = []
     for pixel in set(pranges):
         meta, flux = retrieve_gaia_data(pixel, product=prod)
-        mask = _in_rectangle(meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max)
+        mask = _in_rectangle(
+            meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max
+        )
         all_meta.append(meta[mask])
         all_flux.append(flux[mask])
     return np.hstack(all_meta), np.vstack(all_flux)
