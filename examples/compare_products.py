@@ -20,9 +20,9 @@ def main():
     # Fixed position so repeated runs use the cached tiles.
     ra_deg = 76.377
     dec_deg = 52.831
-    radius_arcmin = 60.0  # 1 degree
+    radius_arcmin = 20.0
     print(f"Query centre: RA = {ra_deg:.4f}°, Dec = {dec_deg:.4f}°")
-    print("Radius: 1.0°")
+    print(f"Radius: {radius_arcmin / 60:.2f}°")
 
     # ---- query source catalogue --------------------------------------------
     print("\nQuerying  source          ...", end=" ", flush=True)
