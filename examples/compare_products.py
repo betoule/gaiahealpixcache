@@ -7,6 +7,7 @@ of the returned sources so you can see which sources have which
 spectroscopy product available.
 """
 
+import os
 import sys
 
 import numpy as np
@@ -65,11 +66,32 @@ def main():
     _plot_ratio(wavelengths, meta_s, flux_s, meta_c, flux_c)
 
 
-def _plot_spatial(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
+def _select_backend():
+    """Return pyplot, falling back to Agg when interactive backends fail."""
+    import matplotlib
+
+    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        matplotlib.use("Agg")
+
+    import matplotlib.pyplot as plt
+
+    # Some interactive backends (e.g. QtAgg) can be imported but fail
+    # when a figure is created (missing Qt bindings).  Attempt a
+    # throw-away figure to force backend initialisation, and fall back
+    # to Agg on failure.
     try:
-        import matplotlib
+        fig = plt.figure()
+        plt.close(fig)
+    except ImportError:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
+    return plt
+
+
+def _plot_spatial(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
+    try:
+        plt = _select_backend()
     except ImportError:
         print(
             "matplotlib is required for plotting.\n"
@@ -135,11 +157,7 @@ def _plot_ratio(wavelengths, meta_s, flux_s, meta_c, flux_c):
     # Clip extreme outliers that would squash the y-axis
     ratio = np.clip(ratio, 0.5, 1.5)
 
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = _select_backend().subplots(figsize=(8, 5))
 
     for i in range(n_common):
         ax.plot(
