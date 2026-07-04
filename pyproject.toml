@@ -41,11 +41,15 @@ test = [
     "pytest",
     "pytest-mock",
     "pytest-cov",
+    "pandas",
 ]
 dev = [
     "black",
     "pylint",
     "pre-commit",
+]
+spectro = [
+    "gaiaxpy>=1.0",
 ]
 
 [tool.pytest.ini_options]

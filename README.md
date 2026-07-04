@@ -67,6 +67,7 @@ A *product* defines which columns are loaded from the Gaia archive and which row
 | `source` | Full Gaia source catalog (selected columns) | none |
 | `bright_sources` | Sources with G < 16 | `phot_g_mean_mag < 16` |
 | `sampled_spectra` | Sampled mean spectra (343 flux points) | none |
+| `continuous_spectra` | Continuous mean spectra (calibrated & sampled via gaiaxpy) | none |
 
 ```python
 # Use the bright_sources product to save disk space
@@ -171,6 +172,32 @@ register_product(spec_product)
 meta, flux = query_spectra(76.377, 52.831, product="spectra_uv_only")
 ```
 
+### Continuous Spectra (via gaiaxpy)
+
+The `continuous_spectra` product downloads **XP continuous mean spectra** and processes them through **gaiaxpy** to produce calibrated, sampled flux arrays — identical in format to the `sampled_spectra` product. The continuous spectra archive is more complete (more sources available) than the pre-sampled archive.
+
+Requires gaiaxpy to be installed:
+
+```bash
+pip install gaiahealpixcache[spectro]
+```
+
+Usage is identical to `sampled_spectra` — just pass `product="continuous_spectra"`:
+
+```python
+import gaiahealpixcache
+
+meta, flux = gaiahealpixcache.query_spectra(
+    ra_deg=76.377,
+    dec_deg=52.831,
+    radius_arcmin=30,
+    product="continuous_spectra",
+)
+print(flux.shape)  # (num_sources, 343)
+```
+
+If gaiaxpy is not installed, a clear `ImportError` is raised guiding you to install the `[spectro]` extra.
+
 ### Wavelengths
 
 Retrieve the wavelength array corresponding to the flux points:
@@ -182,7 +209,7 @@ wavelengths = gaiahealpixcache.spectro_wavelengths()
 print(wavelengths)  # [336., 338., 340., ..., 1018., 1020.]
 ```
 
-Wavelengths are 343 values from 336 to 1020 nm with a step of 2 nm. For custom products with a narrower `spectro_flux_cols` range, only the corresponding wavelengths are returned.
+Wavelengths are 343 values from 336 to 1020 nm with a step of 2 nm. For custom products with a narrower `spectro_flux_cols` range, only the corresponding wavelengths are returned. The same function works for the `continuous_spectra` product.
 
 ### Catalog Matching
 
@@ -273,8 +300,8 @@ download is interrupted, the partial file is discarded, preventing corrupted cac
 |---|---|
 | `query(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia sources within a circular region |
 | `query_rectangular(ra_min, ra_max, dec_min, dec_max, product)` | Query Gaia sources within a rectangular region |
-| `query_spectra(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia spectra within a circular region |
-| `query_spectra_rectangular(ra_min, ra_max, dec_min, dec_max, product)` | Query Gaia spectra within a rectangular region |
+| `query_spectra(ra_deg, dec_deg, radius_arcmin, product)` | Query Gaia spectra within a circular region (supports `sampled_spectra` and `continuous_spectra`) |
+| `query_spectra_rectangular(ra_min, ra_max, dec_min, dec_max, product)` | Query Gaia spectra within a rectangular region (supports `sampled_spectra` and `continuous_spectra`) |
 | `gaia_to_topocentric(catalog, mjd, ...)` | Convert ICRS catalog to topocentric coordinates |
 | `center_at_date(ra, dec, mjd)` | Get apparent RA/Dec at a given date |
 | `conform_coordinates(ra, dec)` | Normalize coordinates to standard convention |
