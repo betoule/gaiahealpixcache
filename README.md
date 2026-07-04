@@ -92,7 +92,7 @@ my_product = GaiaProduct(
     md5sum_file="_MD5SUM.txt",
     file_prefix="GaiaSource_",
     file_ext=".csv.gz",
-    columns=["source_id", "ra", "dec", "parallax", "pmra", "pmdec"],
+    columns=["source_id", "ra", "dec", "parallax", "pmra", "pmdec", "phot_g_mean_mag"],
     where="(parallax > 0) & (phot_g_mean_mag < 18)",
 )
 register_product(my_product)
@@ -157,15 +157,14 @@ from gaiahealpixcache import GaiaProduct, register_product, query_spectra
 
 spec_product = GaiaProduct(
     name="spectra_uv_only",
-    url="https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_spectro/",
+    url="https://cdn.gea.esac.esa.int/Gaia/gdr3/Spectroscopy/xp_sampled_mean_spectrum/",
     md5sum_file="_MD5SUM.txt",
-    file_prefix="GaiaSpectro_",
-    file_ext="_sampledSpectrum.csv",
-    columns=["source_id", "ref_epoch", "ra", "dec"],
+    file_prefix="XpSampledMeanSpectrum_",
+    file_ext=".csv.gz",
+    columns=["source_id"],
     spectro=True,
     spectro_meta_cols=["source_id", "ra", "dec"],
     spectro_flux_cols=(4, 100),  # first 96 flux points only
-    where="phot_g_mean_mag < 15",
 )
 register_product(spec_product)
 
@@ -263,7 +262,7 @@ automatically normalized. You can also call the helper directly:
 
 ```python
 ra, dec = gaiahealpixcache.conform_coordinates(-10.0, 95.0)
-# ra=350.0, dec=85.0
+# ra=170.0, dec=85.0
 ```
 
 ## Cache Management
