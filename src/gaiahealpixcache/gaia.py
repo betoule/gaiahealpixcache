@@ -724,9 +724,7 @@ def query_spectra_rectangular(
     all_flux: list[np.ndarray] = []
     for pixel in set(pranges):
         meta, flux = retrieve_gaia_data(pixel, product=prod)
-        mask = _in_rectangle(
-            meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max
-        )
+        mask = _in_rectangle(meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max)
         all_meta.append(meta[mask])
         all_flux.append(flux[mask])
     return np.hstack(all_meta), np.vstack(all_flux)
