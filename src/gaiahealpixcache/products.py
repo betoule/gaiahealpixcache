@@ -133,10 +133,10 @@ DEFAULT_PRODUCTS: dict[str, "GaiaProduct"] = {
         md5sum_file="_MD5SUM.txt",
         file_prefix="XpContinuousMeanSpectrum_",
         file_ext=".csv.gz",
-        columns=["source_id"],
+        columns=["source_id", "ra", "dec"],
         spectro=True,
         continuous=True,
-        spectro_meta_cols=["source_id"],
+        spectro_meta_cols=["source_id", "ra", "dec"],
         spectro_flux_cols=(4, 347),
     ),
 }

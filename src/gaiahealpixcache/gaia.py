@@ -200,7 +200,6 @@ def _cache_filename(product: GaiaProduct, pixel_range: str) -> str:
 def process_continuous_spectra(
     csv_path: str,
     meta_cols: list[str] | None = None,
-    where: str | None = None,
 ) -> tuple[np.recarray, np.ndarray]:
     """Process a downloaded XP continuous mean spectrum file through gaiaxpy.
 
@@ -209,16 +208,21 @@ def process_continuous_spectra(
     grid (336-1020 nm, step 2 nm). Returns the same (meta, flux) format
     as the existing sampled spectra.
 
+    Notes
+    -----
+    The calibrate output only contains ``source_id``.  Metadata columns
+    requested via *meta_cols* that are not present in the gaiaxpy result
+    (e.g. ``ra``, ``dec``) are silently omitted — the caller
+    (``retrieve_gaia_data``) is responsible for enriching them from the
+    source catalogue.
+
     Parameters
     ----------
     csv_path : str
         Path to the gzipped ECSV file (as downloaded by cached_download).
     meta_cols : list[str], optional
-        Metadata columns to extract from the calibrated result
-        (default: ["source_id"]). Only columns present in the gaiaxpy
-        output are available.
-    where : str | None, optional
-        Filter expression evaluated on metadata.
+        Desired metadata columns (default: ``["source_id"]``).  Only
+        columns actually present in the gaiaxpy output are returned.
 
     Returns
     -------
@@ -238,7 +242,6 @@ def process_continuous_spectra(
 
     import tempfile
 
-    # Decompress the gzipped ECSV file to a temporary file
     tmpname = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=".ecsv", delete=False) as tmp:
@@ -259,16 +262,15 @@ def process_continuous_spectra(
         )
         return meta, np.empty((0, 343), dtype=np.float32)
 
-    # Build metadata from the calibrate output (source_id only)
-    meta = np.rec.fromarrays([result[col].values for col in meta_cols], names=meta_cols)
+    # Only extract columns actually present in the calibrate output.
+    available = {c for c in meta_cols if c in result.columns}
+    if not available:
+        available = {"source_id"}
+    meta = np.rec.fromarrays(
+        [result[c].values for c in available], names=list(available)
+    )
 
-    # Stack the per-source flux arrays into a 2D array
     flux = np.vstack(result["flux"].values).astype(np.float32)
-
-    if where is not None:
-        mask = _safe_eval_where(where, meta)
-        meta = meta[mask]
-        flux = flux[mask]
 
     return meta, flux
 
@@ -306,9 +308,31 @@ def retrieve_gaia_data(
         rawname = f"{prod.file_prefix}{pixel_range}{prod.file_ext}"
         sampled = cached_download(f"{prod.url}{rawname}")
         if prod.continuous:
-            meta, flux = process_continuous_spectra(
-                sampled, prod.spectro_meta_cols, prod.where
-            )
+            meta, flux = process_continuous_spectra(sampled, prod.spectro_meta_cols)
+
+            # Enrich metadata with columns missing from gaiaxpy output
+            # (e.g. ra, dec) by matching against the source catalogue tile.
+            missing = [c for c in prod.spectro_meta_cols if c not in meta.dtype.names]
+            if missing:
+                source = retrieve_gaia_data(pixel_range)
+                idx_cont, idx_src = match_catalogs(meta, source)
+                enriched = {}
+                for col in prod.spectro_meta_cols:
+                    if col in meta.dtype.names:
+                        enriched[col] = meta[col][idx_cont]
+                    else:
+                        enriched[col] = source[col][idx_src]
+                meta = np.rec.fromarrays(
+                    [enriched[c] for c in prod.spectro_meta_cols],
+                    names=prod.spectro_meta_cols,
+                )
+                flux = flux[idx_cont]
+
+            if prod.where is not None:
+                mask = _safe_eval_where(prod.where, meta)
+                meta = meta[mask]
+                flux = flux[mask]
+
             np.savez(fname, meta=meta, flux=flux)
         elif prod.spectro:
             meta, flux = read_gaia_spectra(
@@ -591,16 +615,11 @@ def query_spectra(
     pranges = get_pix_range(dra, ddec, product=prod)
     all_meta: list[np.recarray] = []
     all_flux: list[np.ndarray] = []
-    has_radec = "ra" in prod.spectro_meta_cols if prod.spectro else True
     for pixel in pranges:
         meta, flux = retrieve_gaia_data(pixel, product=prod)
-        if has_radec:
-            in_radius = haversine(meta["ra"], meta["dec"], ra_deg, dec_deg) < rad
-            all_meta.append(meta[in_radius])
-            all_flux.append(flux[in_radius])
-        else:
-            all_meta.append(meta)
-            all_flux.append(flux)
+        in_radius = haversine(meta["ra"], meta["dec"], ra_deg, dec_deg) < rad
+        all_meta.append(meta[in_radius])
+        all_flux.append(flux[in_radius])
     return np.hstack(all_meta), np.vstack(all_flux)
 
 
@@ -703,18 +722,13 @@ def query_spectra_rectangular(
     pranges = get_pix_range(dra, ddec, product=prod)
     all_meta: list[np.recarray] = []
     all_flux: list[np.ndarray] = []
-    has_radec = "ra" in prod.spectro_meta_cols if prod.spectro else True
     for pixel in set(pranges):
         meta, flux = retrieve_gaia_data(pixel, product=prod)
-        if has_radec:
-            mask = _in_rectangle(
-                meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max
-            )
-            all_meta.append(meta[mask])
-            all_flux.append(flux[mask])
-        else:
-            all_meta.append(meta)
-            all_flux.append(flux)
+        mask = _in_rectangle(
+            meta["ra"], meta["dec"], ra_min, ra_max, dec_min, dec_max
+        )
+        all_meta.append(meta[mask])
+        all_flux.append(flux[mask])
     return np.hstack(all_meta), np.vstack(all_flux)
 
 
