@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from gaiahealpixcache import query, query_spectra
+from gaiahealpixcache import query, query_spectra, match_catalogs, spectro_wavelengths
 
 
 def main():
@@ -59,11 +59,13 @@ def main():
         print(f"FAILED: {exc}")
         meta_c = None
 
-    # ---- scatter plot ------------------------------------------------------
-    _plot(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c)
+    # ---- scatter plot of spatial coverage -----------------------------------
+    wavelengths = spectro_wavelengths("sampled_spectra")
+    _plot_spatial(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c)
+    _plot_ratio(wavelengths, meta_s, flux_s, meta_c, flux_c)
 
 
-def _plot(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
+def _plot_spatial(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -77,14 +79,12 @@ def _plot(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # All sources (empty circles)
     ax.scatter(
         src_ra, src_dec,
         facecolors="none", edgecolors="steelblue", s=12, linewidths=0.6,
         label=f"source ({len(src_ra)})",
     )
 
-    # Sampled spectra (plus markers)
     if meta_s is not None and len(meta_s):
         ax.scatter(
             meta_s["ra"], meta_s["dec"],
@@ -92,7 +92,6 @@ def _plot(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
             label=f"sampled_spectra ({len(meta_s)})",
         )
 
-    # Continuous spectra (cross markers)
     if meta_c is not None and len(meta_c):
         ax.scatter(
             meta_c["ra"], meta_c["dec"],
@@ -111,7 +110,61 @@ def _plot(ra_deg, dec_deg, src_ra, src_dec, meta_s, meta_c):
 
     out = "compare_products.png"
     fig.savefig(out, dpi=150)
-    print(f"\nPlot saved to {out}")
+    print(f"\nSpatial coverage plot saved to {out}")
+
+
+def _plot_ratio(wavelengths, meta_s, flux_s, meta_c, flux_c):
+    """Plot the ratio sampled/continuous for sources present in both sets.
+
+    A tight scatter around 1.0 confirms the gaiaxpy calibration produces
+    fluxes consistent with the pre-sampled reference archive.
+    """
+    if meta_s is None or meta_c is None:
+        return
+    if len(meta_s) == 0 or len(meta_c) == 0:
+        return
+
+    idx_s, idx_c = match_catalogs(meta_s, meta_c)
+    n_common = len(idx_s)
+    print(f"\nSources with both sampled and continuous spectra: {n_common}")
+
+    if n_common == 0:
+        return
+
+    ratio = flux_s[idx_s] / flux_c[idx_c]
+    # Clip extreme outliers that would squash the y-axis
+    ratio = np.clip(ratio, 0.5, 1.5)
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for i in range(n_common):
+        ax.plot(
+            wavelengths, ratio[i],
+            color="steelblue", alpha=0.08, linewidth=0.4,
+        )
+
+    # Median ratio curve (bold)
+    med = np.median(ratio, axis=0)
+    ax.plot(
+        wavelengths, med,
+        color="coral", linewidth=1.8, label=f"median (n={n_common})",
+    )
+
+    ax.axhline(1.0, color="grey", linestyle="--", linewidth=0.6)
+    ax.set_xlabel("Wavelength (nm)")
+    ax.set_ylabel("Flux ratio  sampled / continuous")
+    ax.set_title("Consistency check: sampled vs continuous spectra")
+    ax.legend()
+    ax.set_ylim(0.5, 1.5)
+    fig.tight_layout()
+
+    out = "spectral_ratio.png"
+    fig.savefig(out, dpi=150)
+    print(f"Spectral ratio plot saved to {out}")
 
 
 if __name__ == "__main__":
